@@ -15,10 +15,14 @@ namespace test1
 {
     public partial class Form1 : Form
     {
-        private const string CoordinateXRegister = "D2000";
-        private const string CoordinateYRegister = "D2002";
-        private const string CoordinateZRegister = "D2004";
-        private const string VelocityRegister = "D406";
+        // QD75 Positioning Module Buffer Memory Addresses
+        // Axis base: Axis1=G800, Axis2=G900, Axis3=G1000, Axis4=G1100
+        private static readonly int[] AxisBaseG = { 800, 900, 1000, 1100 };
+        private const int OffsetMd20 = 0;   // Command Position (32-bit)
+        private const int OffsetMd21 = 2;   // Actual Position (32-bit)
+        private const int OffsetMd22 = 4;   // Command Speed (32-bit)
+        private const int OffsetMd28 = 16;  // Actual Speed (32-bit)
+        private const int OffsetMd44 = 35;  // Positioning Data No. (16-bit)
         private const string JogBaseRegister = "M3000";
         private const string EmergencyStopRegister = "M3100";
 
@@ -35,9 +39,17 @@ namespace test1
         private readonly List<ProcessRow> processRows = new List<ProcessRow>();
         private readonly Dictionary<string, string> assignedPointKeys = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
-        // telemetry configuration: list of D registers and list of device ranges (e.g. "U0\\G2006" length 2)
-        private readonly List<string> telemetryRegisters = new List<string> { "D2000", "D2002", "D2004" };
+        // telemetry configuration
+        private readonly List<string> telemetryRegisters = new List<string> { "U0\\G800", "U0\\G900", "U0\\G1000", "U0\\G1100" };
         private readonly List<TelemetryBuffer> telemetryBuffers = new List<TelemetryBuffer> { new TelemetryBuffer { Path = "U0\\G2006", Length = 2 } };
+
+        // Axis monitor data (4 axes)
+        private readonly int[] md20Values = new int[4]; // Command position
+        private readonly int[] md21Values = new int[4]; // Actual position
+        private readonly int[] md22Values = new int[4]; // Command speed
+        private readonly int[] md28Values = new int[4]; // Actual speed
+        private readonly int[] md44Values = new int[4]; // Running point
+        private int logicalStation = 0;
 
         // simple in-memory log store for PLC I/O operations
         private readonly List<LogEntry> logs = new List<LogEntry>();
@@ -50,10 +62,6 @@ namespace test1
         private string plcIpAddress = "192.168.3.39";
         private int plcPort = 3000;
         private string connectionBanner = "PLC disconnected";
-        private int coordinateX;
-        private int coordinateY;
-        private int coordinateZ;
-        private int velocityValue = 15;
         private string integrityState = "IDLE";
         private string integrityDetail = "STOP";
         private string integrityTone = "idle";
@@ -155,7 +163,7 @@ namespace test1
                         break;
 
                     case "setVelocity":
-                        await HandleSetVelocityAsync(GetInt(payload, "value", velocityValue));
+                        await HandleSetVelocityAsync(GetInt(payload, "value", 0));
                         break;
 
                     case "addRegister":
@@ -245,8 +253,7 @@ namespace test1
 
         private async Task HandleConnectToggleAsync(Dictionary<string, object> payload)
         {
-            plcIpAddress = GetString(payload, "ip", plcIpAddress).Trim();
-            plcPort = Math.Max(1, GetInt(payload, "port", plcPort));
+            logicalStation = GetInt(payload, "station", logicalStation);
 
             if (plcComm != null && plcComm.IsConnected)
             {
@@ -261,6 +268,8 @@ namespace test1
                 DisconnectPlc(false);
 
                 plcComm = new PLCCommunication(plcIpAddress, plcPort);
+                // Set logical station number from UI
+                // plcDevice.ActLogicalStationNumber is set in PLCCommunication constructor
                 if (!plcComm.Connect())
                 {
                     UpdateConnectionState(false, "PLC disconnected");
@@ -287,24 +296,8 @@ namespace test1
 
         private async Task HandleSetVelocityAsync(int value)
         {
-            velocityValue = Math.Max(0, Math.Min(50, value));
-
-            if (plcComm != null && plcComm.IsConnected)
-            {
-                try
-                {
-                    plcComm.WriteDeviceValue(VelocityRegister, velocityValue);
-                    UpdateIntegrityState(true);
-                    AddLogEntry(VelocityRegister, velocityValue.ToString(CultureInfo.InvariantCulture), "Write", "OK", "SetVelocity");
-                }
-                catch (Exception ex)
-                {
-                    UpdateIntegrityFault(ex.Message);
-                    AddLogEntry(VelocityRegister, velocityValue.ToString(CultureInfo.InvariantCulture), "Write", "Error", ex.Message);
-                    await NotifyAsync("error", "PLC", "Ghi tốc độ thất bại: " + ex.Message);
-                }
-            }
-
+            // Velocity write removed - use Cd.14 buffer addresses if needed
+            await NotifyAsync("info", "PLC", "Velocity control via Cd.14 buffer not yet implemented.");
             await PushControlStateAsync();
         }
 
@@ -500,10 +493,26 @@ namespace test1
 
             try
             {
-                coordinateX = plcComm.ReadDeviceValue(CoordinateXRegister);
-                coordinateY = plcComm.ReadDeviceValue(CoordinateYRegister);
-                coordinateZ = plcComm.ReadDeviceValue(CoordinateZRegister);
-                velocityValue = plcComm.ReadDeviceValue(VelocityRegister);
+                // Read all 4 axes monitor data
+                for (int i = 0; i < 4; i++)
+                {
+                    int baseAddr = AxisBaseG[i];
+                    try
+                    {
+                        md20Values[i] = plcComm.ReadDeviceValue($"U0\\G{baseAddr + OffsetMd20}");
+                        md21Values[i] = plcComm.ReadDeviceValue($"U0\\G{baseAddr + OffsetMd21}");
+                        md22Values[i] = plcComm.ReadDeviceValue($"U0\\G{baseAddr + OffsetMd22}");
+                        md28Values[i] = plcComm.ReadDeviceValue($"U0\\G{baseAddr + OffsetMd28}");
+                        // Md.44 is 16-bit, read 1 word
+                        int[] md44Buf = plcComm.ReadBuffer(0, baseAddr + OffsetMd44, 1);
+                        md44Values[i] = md44Buf[0];
+                    }
+                    catch
+                    {
+                        // Individual axis read failure - keep previous values
+                    }
+                }
+
                 UpdateIntegrityState(true);
 
                 foreach (MonitorRow row in monitorRows)
@@ -616,9 +625,47 @@ namespace test1
             return Task.WhenAll(PushControlStateAsync(), PushDxfStateAsync(), PushTelemetryStateAsync(), PushLogsStateAsync());
         }
 
+        /// <summary>
+        /// Convert raw buffer value to mm (Pr.1=0: raw × 10⁻¹ μm = raw/10000 mm)
+        /// </summary>
+        private static string FormatPositionMm(int rawValue)
+        {
+            double mm = rawValue / 10000.0;
+            return mm.ToString("0.0000", CultureInfo.InvariantCulture);
+        }
+
+        /// <summary>
+        /// Format Md.44 value: 0=Idle, 1-600=Point N, 9001/9002=OPR, 9003=Pos Change
+        /// </summary>
+        private static string FormatMd44(int value)
+        {
+            if (value == 0) return "--";
+            if (value >= 1 && value <= 600) return value.ToString(CultureInfo.InvariantCulture);
+            if (value == 9001 || value == 9002) return "OPR";
+            if (value == 9003) return "CHG";
+            return value.ToString(CultureInfo.InvariantCulture);
+        }
+
         private Task PushControlStateAsync()
         {
             bool connected = plcComm != null && plcComm.IsConnected;
+
+            var axesData = new object[4];
+            for (int i = 0; i < 4; i++)
+            {
+                bool md44Active = md44Values[i] > 0 && md44Values[i] <= 600;
+                axesData[i] = new
+                {
+                    index = i + 1,
+                    md20 = connected ? FormatPositionMm(md20Values[i]) : "--",
+                    md21 = connected ? FormatPositionMm(md21Values[i]) : "--",
+                    md22 = connected ? md22Values[i].ToString(CultureInfo.InvariantCulture) : "--",
+                    md28 = connected ? md28Values[i].ToString(CultureInfo.InvariantCulture) : "--",
+                    md44 = connected ? FormatMd44(md44Values[i]) : "--",
+                    md44Active
+                };
+            }
+
             object payload = new
             {
                 view = currentView,
@@ -626,62 +673,13 @@ namespace test1
                 connection = new
                 {
                     connected,
+                    station = logicalStation,
                     banner = connectionBanner,
-                    ip = plcIpAddress,
-                    port = plcPort,
-                    meta = "MX Component logical station: 0",
-                    buttonText = connected ? "DISCONNECT SYSTEM" : "CONNECT SYSTEM"
+                    meta = $"MX Component logical station: {logicalStation}",
+                    buttonText = connected ? "DISCONNECT PLC Q" : "CONNECT PLC Q"
                 },
-                coordinates = new[]
-                {
-                    new
-                    {
-                        key = "x",
-                        label = "COORDINATE X",
-                        accent = "blue",
-                        display = coordinateX.ToString("0.00", CultureInfo.InvariantCulture),
-                        raw = coordinateX,
-                        register = CoordinateXRegister
-                    },
-                    new
-                    {
-                        key = "y",
-                        label = "COORDINATE Y",
-                        accent = "green",
-                        display = coordinateY.ToString("0.00", CultureInfo.InvariantCulture),
-                        raw = coordinateY,
-                        register = CoordinateYRegister
-                    },
-                    new
-                    {
-                        key = "z",
-                        label = "COORDINATE Z",
-                        accent = "orange",
-                        display = coordinateZ.ToString("0.00", CultureInfo.InvariantCulture),
-                        raw = coordinateZ,
-                        register = CoordinateZRegister
-                    }
-                },
-                velocity = new
-                {
-                    value = velocityValue,
-                    display = (velocityValue / 10.0).ToString("0.0", CultureInfo.InvariantCulture),
-                    register = VelocityRegister,
-                    min = 0,
-                    max = 50
-                },
-                integrity = new
-                {
-                    state = integrityState,
-                    detail = integrityDetail,
-                    tone = integrityTone
-                },
-                monitorRows = monitorRows.Select(row => new
-                {
-                    register = row.Register,
-                    value = row.Value,
-                    status = row.Status
-                }).ToList()
+                axes = axesData,
+                events = new object[0]
             };
 
             return PostToUiAsync("controlState", payload);

@@ -28,13 +28,12 @@
       </div>
     </header>
 
-
     <aside class="sidebar">
       <div class="unit-card">
         <div class="unit-badge">01</div>
         <div>
           <div class="unit-title">Unit 01</div>
-          <div class="unit-subtitle" id="sidebar-status">PLC disconnected</div>
+          <div class="unit-subtitle" id="sidebar-status">Mitsu: DC</div>
         </div>
       </div>
 
@@ -46,6 +45,27 @@
         <button class="side-link" data-view="dxf">DXF RUN</button>
       </nav>
 
+      <!-- Manual Jog in sidebar -->
+      <div class="sidebar-jog">
+        <div class="sidebar-jog-title">Manual Jog</div>
+        <div class="sidebar-jog-subtitle">M-register pulse control</div>
+        <div class="jog-layout-sidebar">
+          <div class="jog-pad-sm">
+            <button class="jog-btn-sm up" data-jog-offset="2">↑</button>
+            <button class="jog-btn-sm left" data-jog-offset="1">←</button>
+            <button class="jog-btn-sm right" data-jog-offset="0">→</button>
+            <button class="jog-btn-sm down" data-jog-offset="3">↓</button>
+            <div class="jog-center-sm">XY</div>
+          </div>
+          <div class="jog-z-stack-sm">
+            <button class="jog-btn-sm z" data-jog-offset="4">Z+</button>
+            <button class="jog-btn-sm z" data-jog-offset="5">Z-</button>
+          </div>
+        </div>
+        <div class="jog-addr-info">X+:M3000 · X-:M3001 · Y+:M3002 · Y-:M3003 ·
+          Z+:M3004 · Z-:M3005</div>
+      </div>
+
       <div class="sidebar-footer">
         <button id="emergency-stop" class="danger-button full-width">EMERGENCY STOP</button>
         <button class="side-footer-link" data-placeholder="SUPPORT">SUPPORT</button>
@@ -54,8 +74,10 @@
     </aside>
 
     <main class="content">
+      <!-- ========== DASHBOARD ========== -->
       <section id="view-control" class="view is-active">
         <div class="dashboard-grid">
+          <!-- System Connectivity -->
           <div class="panel panel-connection">
             <div class="panel-header">
               <div>
@@ -63,121 +85,155 @@
                 <div class="panel-subtitle">Mitsubishi PLC Network Interface</div>
               </div>
             </div>
-            <div id="connection-banner" class="status-banner disconnected">PLC DISCONNECTED</div>
-            <label class="field-label" for="plc-ip">IP Address</label>
-            <input id="plc-ip" class="text-input" type="text" value="192.168.3.39">
-            <label class="field-label" for="plc-port">Port</label>
-            <input id="plc-port" class="text-input" type="number" value="3000">
-            <button id="connect-button" class="primary-button full-width">CONNECT SYSTEM</button>
-            <div id="connection-meta" class="muted-text">MX Component logical station: 0</div>
-          </div>
 
-          <div id="coord-x" class="panel metric-card accent-blue">
-            <div class="metric-title">COORDINATE X</div>
-            <div class="metric-row">
-              <div class="metric-value" id="coord-x-value">0.00</div>
-              <div class="metric-unit">um</div>
+            <div class="conn-section">
+              <div class="conn-label-row">
+                <span class="conn-brand">MITSUBISHI</span>
+                <span id="plc-status-dot" class="status-dot disconnected"></span>
+                <span id="plc-status-text" class="status-dot-text">DC</span>
+              </div>
+              <label class="field-label" for="plc-station">LOGICAL STATION NO.</label>
+              <input id="plc-station" class="text-input" type="number" value="0">
+              <button id="connect-button" class="primary-button full-width connect-btn-q">CONNECT PLC Q</button>
             </div>
-            <div class="metric-raw" id="coord-x-raw">Raw: 0 (D2000)</div>
+
+            <div id="connection-meta" class="muted-text" style="margin-top:12px;">MX Component logical station: 0</div>
           </div>
 
-          <div id="coord-y" class="panel metric-card accent-green">
-            <div class="metric-title">COORDINATE Y</div>
-            <div class="metric-row">
-              <div class="metric-value" id="coord-y-value">0.00</div>
-              <div class="metric-unit">um</div>
-            </div>
-            <div class="metric-raw" id="coord-y-raw">Raw: 0 (D2002)</div>
-          </div>
-
-          <div id="coord-z" class="panel metric-card accent-orange">
-            <div class="metric-title">COORDINATE Z</div>
-            <div class="metric-row">
-              <div class="metric-value" id="coord-z-value">0.00</div>
-              <div class="metric-unit">um</div>
-            </div>
-            <div class="metric-raw" id="coord-z-raw">Raw: 0 (D2004)</div>
-          </div>
-
-          <div class="panel panel-velocity">
+          <!-- Axis Monitor -->
+          <div class="panel panel-axis-monitor">
             <div class="panel-header">
               <div>
-                <div class="panel-title">Process Velocity</div>
-                <div class="panel-subtitle" id="velocity-subtitle">Target write velocity (D406)</div>
+                <div class="panel-title">Axis Monitor</div>
+                <div class="panel-subtitle">Md.20 Command Position · Md.21 Actual Position · Md.22 Command Speed · Md.28
+                  Actual Speed</div>
               </div>
             </div>
-            <div class="velocity-layout">
-              <div class="velocity-readout">
-                <div id="velocity-value" class="velocity-value">1.5</div>
-                <div class="velocity-unit">m/s</div>
+            <div class="axis-grid" id="axis-grid">
+              <!-- Axis 1 -->
+              <div class="axis-card">
+                <div class="axis-header accent-axis-1">AXIS 1</div>
+                <div class="axis-body">
+                  <div class="axis-field">
+                    <div class="axis-field-label">COMMAND POSITION <span class="axis-md">(Md.20)</span></div>
+                    <div class="axis-field-value" id="axis1-md20">--</div>
+                  </div>
+                  <div class="axis-field">
+                    <div class="axis-field-label">ACTUAL POSITION <span class="axis-md">(Md.21)</span></div>
+                    <div class="axis-field-value" id="axis1-md21">--</div>
+                  </div>
+                  <div class="axis-field">
+                    <div class="axis-field-label">COMMAND SPEED <span class="axis-md">(Md.22)</span></div>
+                    <div class="axis-field-value" id="axis1-md22">--</div>
+                  </div>
+                  <div class="axis-field">
+                    <div class="axis-field-label">ACTUAL SPEED <span class="axis-md">(Md.28)</span></div>
+                    <div class="axis-field-value" id="axis1-md28">--</div>
+                  </div>
+                  <div class="axis-running-point" id="axis1-rp-bar">
+                    <span class="rp-label">RUNNING POINT <span class="axis-md">(Md.44)</span></span>
+                    <span class="rp-value" id="axis1-md44">--</span>
+                  </div>
+                </div>
               </div>
-              <div class="slider-block">
-                <input id="velocity-slider" class="velocity-slider" type="range" min="0" max="50" value="15">
-                <div class="slider-scale">
-                  <span>0.0</span>
-                  <span id="velocity-raw">Raw: 15 (D406)</span>
-                  <span>5.0</span>
+              <!-- Axis 2 -->
+              <div class="axis-card">
+                <div class="axis-header accent-axis-2">AXIS 2</div>
+                <div class="axis-body">
+                  <div class="axis-field">
+                    <div class="axis-field-label">COMMAND POSITION <span class="axis-md">(Md.20)</span></div>
+                    <div class="axis-field-value" id="axis2-md20">--</div>
+                  </div>
+                  <div class="axis-field">
+                    <div class="axis-field-label">ACTUAL POSITION <span class="axis-md">(Md.21)</span></div>
+                    <div class="axis-field-value" id="axis2-md21">--</div>
+                  </div>
+                  <div class="axis-field">
+                    <div class="axis-field-label">COMMAND SPEED <span class="axis-md">(Md.22)</span></div>
+                    <div class="axis-field-value" id="axis2-md22">--</div>
+                  </div>
+                  <div class="axis-field">
+                    <div class="axis-field-label">ACTUAL SPEED <span class="axis-md">(Md.28)</span></div>
+                    <div class="axis-field-value" id="axis2-md28">--</div>
+                  </div>
+                  <div class="axis-running-point" id="axis2-rp-bar">
+                    <span class="rp-label">RUNNING POINT <span class="axis-md">(Md.44)</span></span>
+                    <span class="rp-value" id="axis2-md44">--</span>
+                  </div>
+                </div>
+              </div>
+              <!-- Axis 3 -->
+              <div class="axis-card">
+                <div class="axis-header accent-axis-3">AXIS 3</div>
+                <div class="axis-body">
+                  <div class="axis-field">
+                    <div class="axis-field-label">COMMAND POSITION <span class="axis-md">(Md.20)</span></div>
+                    <div class="axis-field-value" id="axis3-md20">--</div>
+                  </div>
+                  <div class="axis-field">
+                    <div class="axis-field-label">ACTUAL POSITION <span class="axis-md">(Md.21)</span></div>
+                    <div class="axis-field-value" id="axis3-md21">--</div>
+                  </div>
+                  <div class="axis-field">
+                    <div class="axis-field-label">COMMAND SPEED <span class="axis-md">(Md.22)</span></div>
+                    <div class="axis-field-value" id="axis3-md22">--</div>
+                  </div>
+                  <div class="axis-field">
+                    <div class="axis-field-label">ACTUAL SPEED <span class="axis-md">(Md.28)</span></div>
+                    <div class="axis-field-value" id="axis3-md28">--</div>
+                  </div>
+                  <div class="axis-running-point" id="axis3-rp-bar">
+                    <span class="rp-label">RUNNING POINT <span class="axis-md">(Md.44)</span></span>
+                    <span class="rp-value" id="axis3-md44">--</span>
+                  </div>
+                </div>
+              </div>
+              <!-- Axis 4 -->
+              <div class="axis-card">
+                <div class="axis-header accent-axis-4">AXIS 4</div>
+                <div class="axis-body">
+                  <div class="axis-field">
+                    <div class="axis-field-label">COMMAND POSITION <span class="axis-md">(Md.20)</span></div>
+                    <div class="axis-field-value" id="axis4-md20">--</div>
+                  </div>
+                  <div class="axis-field">
+                    <div class="axis-field-label">ACTUAL POSITION <span class="axis-md">(Md.21)</span></div>
+                    <div class="axis-field-value" id="axis4-md21">--</div>
+                  </div>
+                  <div class="axis-field">
+                    <div class="axis-field-label">COMMAND SPEED <span class="axis-md">(Md.22)</span></div>
+                    <div class="axis-field-value" id="axis4-md22">--</div>
+                  </div>
+                  <div class="axis-field">
+                    <div class="axis-field-label">ACTUAL SPEED <span class="axis-md">(Md.28)</span></div>
+                    <div class="axis-field-value" id="axis4-md28">--</div>
+                  </div>
+                  <div class="axis-running-point" id="axis4-rp-bar">
+                    <span class="rp-label">RUNNING POINT <span class="axis-md">(Md.44)</span></span>
+                    <span class="rp-value" id="axis4-md44">--</span>
+                  </div>
                 </div>
               </div>
             </div>
           </div>
 
-          <div class="panel panel-integrity">
-            <div class="panel-title center">System Integrity</div>
-            <div id="integrity-state" class="integrity-state idle">IDLE</div>
-            <div id="integrity-detail" class="integrity-detail">STOP</div>
-          </div>
-
-          <div class="panel panel-jog">
+          <!-- System Events -->
+          <div class="panel panel-events">
             <div class="panel-header">
               <div>
-                <div class="panel-title">Manual Kinematic Jog</div>
-                <div class="panel-subtitle">Direct M-register pulse control</div>
+                <div class="panel-title">System Events</div>
+                <div class="panel-subtitle">DXF run progress · Errors · Connection events</div>
               </div>
+              <button id="clear-events-button" class="text-button">Clear</button>
             </div>
-            <div class="jog-layout">
-              <div class="jog-pad">
-                <button class="jog-button up" data-jog-offset="2">↑</button>
-                <button class="jog-button left" data-jog-offset="1">←</button>
-                <button class="jog-button right" data-jog-offset="0">→</button>
-                <button class="jog-button down" data-jog-offset="3">↓</button>
-                <div class="jog-center">XY</div>
-              </div>
-              <div class="jog-z-stack">
-                <button class="jog-button z" data-jog-offset="4">Z+</button>
-                <button class="jog-button z" data-jog-offset="5">Z-</button>
-              </div>
-            </div>
-            <div class="jog-base">Current Jog Base Address: M3000</div>
-          </div>
-
-          <div class="panel panel-stream">
-            <div class="panel-header stream-header">
-              <div>
-                <div class="panel-title">Real-Time Data Stream</div>
-                <div class="panel-subtitle">Live PLC register monitoring</div>
-              </div>
-              <button id="add-register" class="text-button">+ ADD REGISTER</button>
-            </div>
-            <div class="table-frame">
-              <table class="data-table">
-                <thead>
-                  <tr>
-                    <th>Register</th>
-                    <th>Value</th>
-                    <th>Status</th>
-                    <th class="action-col"></th>
-                  </tr>
-                </thead>
-                <tbody id="monitor-table-body"></tbody>
-              </table>
-              <div id="monitor-empty" class="empty-state">No registers being monitored. Use ADD REGISTER to start live
-                data flow.</div>
+            <div id="events-list" class="events-list">
+              <div id="events-empty" class="events-empty">No events yet.</div>
             </div>
           </div>
         </div>
       </section>
 
+      <!-- ========== LOGS ========== -->
       <section id="view-logs" class="view">
         <div class="panel">
           <div class="panel-header">
@@ -209,6 +265,7 @@
         </div>
       </section>
 
+      <!-- ========== TELEMETRY ========== -->
       <section id="view-telemetry" class="view">
         <div class="panel">
           <div class="panel-header">
@@ -224,8 +281,8 @@
           </div>
 
           <div class="telemetry-actions" style="margin-top:12px; display:flex; gap:8px; align-items:center;">
-            <input id="write-buffer-path" class="text-input compact" type="text" placeholder="D100, M10, U0\G2006..." value="D100"
-              style="width:240px;" />
+            <input id="write-buffer-path" class="text-input compact" type="text" placeholder="D100, M10, U0\G2006..."
+              value="D100" style="width:240px;" />
             <input id="write-buffer-value" class="text-input compact" type="number" placeholder="Value" value="12345"
               style="width:140px;" />
             <button id="write-buffer-button" class="primary-button compact">Write Data</button>
@@ -233,6 +290,7 @@
         </div>
       </section>
 
+      <!-- ========== DXF RUN ========== -->
       <section id="view-dxf" class="view">
         <div class="panel dxf-toolbar">
           <div class="toolbar-field toolbar-path">
