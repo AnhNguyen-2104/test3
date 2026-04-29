@@ -21,7 +21,7 @@ namespace test1
         private const int OffsetMd20 = 0;   // Command Position (32-bit)
         private const int OffsetMd21 = 2;   // Actual Position (32-bit)
         private const int OffsetMd22 = 4;   // Command Speed (32-bit)
-        private const int OffsetMd28 = 16;  // Actual Speed (32-bit)
+        private const int OffsetMd28 = 12;  // Actual Speed (32-bit)
         private const int OffsetMd44 = 35;  // Positioning Data No. (16-bit)
         private const string JogBaseRegister = "M3000";
         private const string EmergencyStopRegister = "M3100";
@@ -89,7 +89,7 @@ namespace test1
             UpdateConnectionState(false, "PLC disconnected");
             UpdateIntegrityState(false);
 
-            plcPollTimer.Interval = 500;
+            plcPollTimer.Interval = 100; // Tăng tốc độ cập nhật UI (100ms)
             plcPollTimer.Tick += PlcPollTimer_Tick;
 
             Shown += async (sender, e) => await InitializeWebViewAsync();
@@ -499,13 +499,14 @@ namespace test1
                     int baseAddr = AxisBaseG[i];
                     try
                     {
-                        md20Values[i] = plcComm.ReadDeviceValue($"U0\\G{baseAddr + OffsetMd20}");
-                        md21Values[i] = plcComm.ReadDeviceValue($"U0\\G{baseAddr + OffsetMd21}");
-                        md22Values[i] = plcComm.ReadDeviceValue($"U0\\G{baseAddr + OffsetMd22}");
-                        md28Values[i] = plcComm.ReadDeviceValue($"U0\\G{baseAddr + OffsetMd28}");
-                        // Md.44 is 16-bit, read 1 word
-                        int[] md44Buf = plcComm.ReadBuffer(0, baseAddr + OffsetMd44, 1);
-                        md44Values[i] = md44Buf[0];
+                        // Đọc 1 lần 36 words (từ G800 đến G835) để giảm delay giao tiếp
+                        int[] buffer = plcComm.ReadBuffer(0, baseAddr, 36);
+                        
+                        md20Values[i] = (buffer[OffsetMd20 + 1] << 16) | (buffer[OffsetMd20] & 0xFFFF);
+                        md21Values[i] = (buffer[OffsetMd21 + 1] << 16) | (buffer[OffsetMd21] & 0xFFFF);
+                        md22Values[i] = (buffer[OffsetMd22 + 1] << 16) | (buffer[OffsetMd22] & 0xFFFF);
+                        md28Values[i] = (buffer[OffsetMd28 + 1] << 16) | (buffer[OffsetMd28] & 0xFFFF);
+                        md44Values[i] = buffer[OffsetMd44];
                     }
                     catch
                     {
