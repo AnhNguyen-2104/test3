@@ -1,0 +1,341 @@
+<!DOCTYPE html>
+<html lang="en" class="theme-dark">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Gantry SCADA Robot Control</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="brand-block">
+        <div class="brand-title">PRECISION SCADA</div>
+        <nav class="top-nav">
+          <button class="nav-link is-active" data-view="control">DASHBOARD</button>
+          <button class="nav-link" data-view="logs">LOGS</button>
+          <button class="nav-link" data-view="telemetry">TELEMETRY</button>
+          <button class="nav-link" data-placeholder="SYSTEM SETTINGS">SYSTEM SETTINGS</button>
+          <button class="nav-link" data-view="dxf">DXF RUN</button>
+        </nav>
+      </div>
+      <div class="top-actions">
+        <button id="theme-toggle" class="icon-button" title="Toggle theme">◐</button>
+        <button class="icon-button" data-placeholder="NOTIFICATIONS" title="Notifications">!</button>
+        <button class="icon-button" data-placeholder="PROFILE" title="Profile">◎</button>
+      </div>
+    </header>
+
+
+    <aside class="sidebar">
+      <div class="unit-card">
+        <div class="unit-badge">01</div>
+        <div>
+          <div class="unit-title">Unit 01</div>
+          <div class="unit-subtitle" id="sidebar-status">PLC disconnected</div>
+        </div>
+      </div>
+
+      <nav class="side-nav">
+        <button class="side-link is-active" data-view="control">CONTROL</button>
+        <button class="side-link" data-view="telemetry">TELEMETRY</button>
+        <button class="side-link" data-view="logs">LOGS</button>
+        <button class="side-link" data-placeholder="SETTINGS">SETTINGS</button>
+        <button class="side-link" data-view="dxf">DXF RUN</button>
+      </nav>
+
+      <div class="sidebar-footer">
+        <button id="emergency-stop" class="danger-button full-width">EMERGENCY STOP</button>
+        <button class="side-footer-link" data-placeholder="SUPPORT">SUPPORT</button>
+        <button class="side-footer-link" data-placeholder="LOGOUT">LOGOUT</button>
+      </div>
+    </aside>
+
+    <main class="content">
+      <section id="view-control" class="view is-active">
+        <div class="dashboard-grid">
+          <div class="panel panel-connection">
+            <div class="panel-header">
+              <div>
+                <div class="panel-title">System Connectivity</div>
+                <div class="panel-subtitle">Mitsubishi PLC Network Interface</div>
+              </div>
+            </div>
+            <div id="connection-banner" class="status-banner disconnected">PLC DISCONNECTED</div>
+            <label class="field-label" for="plc-ip">IP Address</label>
+            <input id="plc-ip" class="text-input" type="text" value="192.168.3.39">
+            <label class="field-label" for="plc-port">Port</label>
+            <input id="plc-port" class="text-input" type="number" value="3000">
+            <button id="connect-button" class="primary-button full-width">CONNECT SYSTEM</button>
+            <div id="connection-meta" class="muted-text">MX Component logical station: 0</div>
+          </div>
+
+          <div id="coord-x" class="panel metric-card accent-blue">
+            <div class="metric-title">COORDINATE X</div>
+            <div class="metric-row">
+              <div class="metric-value" id="coord-x-value">0.00</div>
+              <div class="metric-unit">um</div>
+            </div>
+            <div class="metric-raw" id="coord-x-raw">Raw: 0 (D2000)</div>
+          </div>
+
+          <div id="coord-y" class="panel metric-card accent-green">
+            <div class="metric-title">COORDINATE Y</div>
+            <div class="metric-row">
+              <div class="metric-value" id="coord-y-value">0.00</div>
+              <div class="metric-unit">um</div>
+            </div>
+            <div class="metric-raw" id="coord-y-raw">Raw: 0 (D2002)</div>
+          </div>
+
+          <div id="coord-z" class="panel metric-card accent-orange">
+            <div class="metric-title">COORDINATE Z</div>
+            <div class="metric-row">
+              <div class="metric-value" id="coord-z-value">0.00</div>
+              <div class="metric-unit">um</div>
+            </div>
+            <div class="metric-raw" id="coord-z-raw">Raw: 0 (D2004)</div>
+          </div>
+
+          <div class="panel panel-velocity">
+            <div class="panel-header">
+              <div>
+                <div class="panel-title">Process Velocity</div>
+                <div class="panel-subtitle" id="velocity-subtitle">Target write velocity (D406)</div>
+              </div>
+            </div>
+            <div class="velocity-layout">
+              <div class="velocity-readout">
+                <div id="velocity-value" class="velocity-value">1.5</div>
+                <div class="velocity-unit">m/s</div>
+              </div>
+              <div class="slider-block">
+                <input id="velocity-slider" class="velocity-slider" type="range" min="0" max="50" value="15">
+                <div class="slider-scale">
+                  <span>0.0</span>
+                  <span id="velocity-raw">Raw: 15 (D406)</span>
+                  <span>5.0</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="panel panel-integrity">
+            <div class="panel-title center">System Integrity</div>
+            <div id="integrity-state" class="integrity-state idle">IDLE</div>
+            <div id="integrity-detail" class="integrity-detail">STOP</div>
+          </div>
+
+          <div class="panel panel-jog">
+            <div class="panel-header">
+              <div>
+                <div class="panel-title">Manual Kinematic Jog</div>
+                <div class="panel-subtitle">Direct M-register pulse control</div>
+              </div>
+            </div>
+            <div class="jog-layout">
+              <div class="jog-pad">
+                <button class="jog-button up" data-jog-offset="2">↑</button>
+                <button class="jog-button left" data-jog-offset="1">←</button>
+                <button class="jog-button right" data-jog-offset="0">→</button>
+                <button class="jog-button down" data-jog-offset="3">↓</button>
+                <div class="jog-center">XY</div>
+              </div>
+              <div class="jog-z-stack">
+                <button class="jog-button z" data-jog-offset="4">Z+</button>
+                <button class="jog-button z" data-jog-offset="5">Z-</button>
+              </div>
+            </div>
+            <div class="jog-base">Current Jog Base Address: M3000</div>
+          </div>
+
+          <div class="panel panel-stream">
+            <div class="panel-header stream-header">
+              <div>
+                <div class="panel-title">Real-Time Data Stream</div>
+                <div class="panel-subtitle">Live PLC register monitoring</div>
+              </div>
+              <button id="add-register" class="text-button">+ ADD REGISTER</button>
+            </div>
+            <div class="table-frame">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Register</th>
+                    <th>Value</th>
+                    <th>Status</th>
+                    <th class="action-col"></th>
+                  </tr>
+                </thead>
+                <tbody id="monitor-table-body"></tbody>
+              </table>
+              <div id="monitor-empty" class="empty-state">No registers being monitored. Use ADD REGISTER to start live
+                data flow.</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="view-logs" class="view">
+        <div class="panel">
+          <div class="panel-header">
+            <div>
+              <div class="panel-title">Logs</div>
+              <div class="panel-subtitle">Các giao dịch đọc/ghi PLC</div>
+            </div>
+            <div>
+              <button id="clear-logs-button" class="text-button">Clear</button>
+            </div>
+          </div>
+
+          <div class="table-frame">
+            <table class="data-table compact">
+              <thead>
+                <tr>
+                  <th>Time</th>
+                  <th>Dir</th>
+                  <th>Address</th>
+                  <th>Value</th>
+                  <th>Status</th>
+                  <th>Message</th>
+                </tr>
+              </thead>
+              <tbody id="logs-table-body"></tbody>
+            </table>
+            <div id="logs-empty" class="empty-state">No logs yet.</div>
+          </div>
+        </div>
+      </section>
+
+      <section id="view-telemetry" class="view">
+        <div class="panel">
+          <div class="panel-header">
+            <div>
+              <div class="panel-title">Telemetry</div>
+              <div class="panel-subtitle">Live D registers and Un\\Gx buffers</div>
+            </div>
+          </div>
+
+          <div id="telemetry-content" class="telemetry-content">
+            <!-- content populated by app.js renderTelemetry() -->
+            <div class="telemetry-empty">Không có dữ liệu telemetry. Kết nối PLC để kích hoạt.</div>
+          </div>
+
+          <div class="telemetry-actions" style="margin-top:12px; display:flex; gap:8px; align-items:center;">
+            <input id="write-buffer-path" class="text-input compact" type="text" placeholder="D100, M10, U0\G2006..." value="D100"
+              style="width:240px;" />
+            <input id="write-buffer-value" class="text-input compact" type="number" placeholder="Value" value="12345"
+              style="width:140px;" />
+            <button id="write-buffer-button" class="primary-button compact">Write Data</button>
+          </div>
+        </div>
+      </section>
+
+      <section id="view-dxf" class="view">
+        <div class="panel dxf-toolbar">
+          <div class="toolbar-field toolbar-path">
+            <input id="cad-path" class="text-input compact" type="text" placeholder="Đường dẫn cad" readonly>
+          </div>
+          <div class="toolbar-field toolbar-file">
+            <input id="cad-file" class="text-input compact" type="text" placeholder="Tên file" readonly>
+          </div>
+          <button id="open-dxf" class="primary-button toolbar-open compact">Open</button>
+        </div>
+
+        <div class="dxf-grid">
+          <div class="panel panel-preview">
+            <div class="preview-frame">
+              <svg id="cad-preview" viewBox="0 0 1000 560" preserveAspectRatio="xMidYMid meet"></svg>
+              <div id="cad-placeholder" class="preview-placeholder">View CAD</div>
+            </div>
+
+            <div class="dxf-actions">
+              <div class="action-row">
+                <button class="primary-button" data-assign-slot="start">Điểm bắt đầu</button>
+                <button class="primary-button" data-assign-slot="glueStart">Bắt đầu bơm keo</button>
+                <button class="primary-button" data-assign-slot="glueEnd">Kết thúc bơm keo</button>
+                <button class="primary-button" data-process-key="zDown">Z hạ</button>
+                <button class="primary-button" data-process-key="zSafe">Z an toàn</button>
+                <button class="primary-button" data-process-key="speed">Tốc độ</button>
+              </div>
+              <div class="action-row">
+                <button id="import-cad-to-process-button" class="primary-button">Import CAD → Process</button>
+                <button id="send-cad-x-button" class="primary-button">Send CAD X</button>
+                <button class="primary-button secondary-tone" data-run-action="resume">Resume</button>
+                <button class="primary-button secondary-tone" data-run-action="pause">Pause</button>
+                <button class="primary-button" data-run-action="start">Start</button>
+              </div>
+            </div>
+
+          </div>
+          <div class="panel panel-points">
+            <div class="table-frame tall">
+              <table class="data-table compact points-table">
+                <thead>
+                  <tr>
+                    <th>STT</th>
+                    <th>Loại đường</th>
+                    <th>Bắt đầu X</th>
+                    <th>Bắt đầu Y</th>
+                    <th>Kết thúc X</th>
+                    <th>Kết thúc Y</th>
+                    <th>Tâm X</th>
+                    <th>Tâm Y</th>
+                  </tr>
+                </thead>
+                <tbody id="points-table-body"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="panel panel-process">
+            <div class="table-frame short">
+              <table class="data-table compact">
+                <thead>
+                  <tr>
+                    <th>Loại chuyển động</th>
+                    <th>Giá trị M code</th>
+                    <th>Dwell</th>
+                    <th>Tốc độ</th>
+                    <th>Tọa độ cuối (X;Y)</th>
+                    <th>Tọa độ tâm (X;Y)</th>
+                  </tr>
+                </thead>
+                <tbody id="process-table-body"></tbody>
+              </table>
+            </div>
+
+            <!-- Instruction / Notes area added -->
+            <div class="dxf-notes"
+              style="margin-top: 12px; font-size: 12px; color: var(--muted); display: flex; gap: 20px;">
+              <strong>Giá trị M code:</strong>
+              <span>M code = 1 (Bật bơm keo)</span>
+              <span>M code = 2 (Dừng bơm keo)</span>
+            </div>
+
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div id="toast-container" class="toast-container"></div>
+
+  <div id="prompt-modal" class="modal-backdrop hidden">
+    <div class="modal-card">
+      <div id="modal-title" class="modal-title">Input</div>
+      <div id="modal-label" class="modal-label"></div>
+      <input id="modal-input" class="text-input" type="text">
+      <div class="modal-actions">
+        <button id="modal-cancel" class="secondary-button">Cancel</button>
+        <button id="modal-confirm" class="primary-button">OK</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+
+</html>
