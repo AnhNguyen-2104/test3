@@ -71,7 +71,9 @@ namespace test1
 
         private PLCCommunication plcComm;
         private CadDocumentService.CadLoadResult activeCadDocument;
-        private bool webReady;
+        private volatile bool webReady;
+        private volatile bool isClosing;
+        private volatile bool isPolling;
         private string currentView = "control";
         private string currentTheme = "dark";
         private string plcIpAddress = "192.168.3.39";
@@ -104,7 +106,7 @@ namespace test1
             UpdateConnectionState(false, "PLC disconnected");
             UpdateIntegrityState(false);
 
-            plcPollTimer.Interval = 100; // Tăng tốc độ cập nhật UI (100ms)
+            plcPollTimer.Interval = 50; // Real-time 50ms polling
             plcPollTimer.Tick += PlcPollTimer_Tick;
 
             Shown += async (sender, e) => await InitializeWebViewAsync();
@@ -207,6 +209,18 @@ namespace test1
 
                     case "goHomeStop":
                         await HandleGoHomeWriteAsync(false);
+                        break;
+
+                    case "resetErrorStart":
+                        await HandleResetErrorWriteAsync(true);
+                        break;
+
+                    case "resetErrorStop":
+                        await HandleResetErrorWriteAsync(false);
+                        break;
+
+                    case "setJogSpeed":
+                        await HandleSetJogSpeedAsync(GetDouble(payload, "value", 0));
                         break;
 
                     case "emergencyStop":
@@ -382,6 +396,20 @@ namespace test1
                 plcComm.WriteDeviceValue(register, v);
                 UpdateIntegrityState(true);
                 AddLogEntry(register, v.ToString(CultureInfo.InvariantCulture), "Write", "OK", "Jog");
+                
+                if (active)
+                {
+                    string dir = "Unknown";
+                    switch(offset) {
+                        case 0: dir = "Right (X+)"; break;
+                        case 1: dir = "Left (X-)"; break;
+                        case 2: dir = "Up (Y+)"; break;
+                        case 3: dir = "Down (Y-)"; break;
+                        case 4: dir = "Z+"; break;
+                        case 5: dir = "Z-"; break;
+                    }
+                    await NotifyAsync("info", "Jog", $"Bắt đầu Jog {dir} ({register})");
+                }
             }
             catch (Exception ex)
             {
@@ -404,6 +432,11 @@ namespace test1
                 plcComm.WriteDeviceValue("M502", v);
                 UpdateIntegrityState(true);
                 AddLogEntry("M502", v.ToString(CultureInfo.InvariantCulture), "Write", "OK", "GoHome");
+                
+                if (active)
+                {
+                    await NotifyAsync("warning", "System", "Kích hoạt lệnh GO HOME (M502)");
+                }
             }
             catch (Exception ex)
             {
@@ -414,6 +447,54 @@ namespace test1
                     await NotifyAsync("error", "Go Home", ex.Message);
                     await PushControlStateAsync();
                 }
+            }
+        }
+
+        private async Task HandleResetErrorWriteAsync(bool active)
+        {
+            try
+            {
+                EnsureConnected();
+                int v = active ? 1 : 0;
+                plcComm.WriteDeviceValue("M300", v);
+                UpdateIntegrityState(true);
+                AddLogEntry("M300", v.ToString(CultureInfo.InvariantCulture), "Write", "OK", "ResetError");
+                
+                if (active)
+                {
+                    await NotifyAsync("success", "System", "Kích hoạt lệnh RESET ERROR (M300)");
+                }
+            }
+            catch (Exception ex)
+            {
+                if (active)
+                {
+                    UpdateIntegrityFault(ex.Message);
+                    AddLogEntry("M300", (active ? 1 : 0).ToString(CultureInfo.InvariantCulture), "Write", "Error", ex.Message);
+                    await NotifyAsync("error", "Reset Error", ex.Message);
+                    await PushControlStateAsync();
+                }
+            }
+        }
+
+        private async Task HandleSetJogSpeedAsync(double value)
+        {
+            try
+            {
+                EnsureConnected();
+                
+                // Quy đổi số thực (IEEE 754) sang 32-bit integer để ghi xuống 2 thanh ghi D406-D407
+                float fVal = (float)value;
+                byte[] bytes = BitConverter.GetBytes(fVal);
+                int intVal = BitConverter.ToInt32(bytes, 0);
+
+                plcComm.WriteDeviceValue("D406", intVal);
+                AddLogEntry("D406", value.ToString("F3", CultureInfo.InvariantCulture), "Write", "OK", "SetJogSpeed(Float)");
+                await NotifyAsync("success", "Settings", $"Đã cập nhật tốc độ Jog (Real): {value:F3} (D406)");
+            }
+            catch (Exception ex)
+            {
+                await NotifyAsync("error", "Settings", "Lỗi cập nhật tốc độ Jog: " + ex.Message);
             }
         }
 
@@ -539,60 +620,86 @@ namespace test1
 
         private async void PlcPollTimer_Tick(object sender, EventArgs e)
         {
-            if (plcComm == null || !plcComm.IsConnected)
+            if (isClosing || isPolling || plcComm == null || !plcComm.IsConnected)
             {
                 return;
             }
 
+            isPolling = true;
             try
             {
-                // Read all 4 axes: monitor area (15 words) + control area (20 words)
-                for (int i = 0; i < 4; i++)
+                // Move PLC COM reads to background thread to avoid blocking UI
+                var comm = plcComm;
+                if (comm == null || !comm.IsConnected) { isPolling = false; return; }
+
+                await Task.Run(() =>
                 {
-                    try
+                    if (isClosing) return;
+                    // Read all 4 axes: monitor area (15 words) + control area (20 words)
+                    for (int i = 0; i < 4; i++)
                     {
-                        // Monitor area: G800..G814 (15 words)
-                        int[] mon = plcComm.ReadBuffer(0, MonitorBaseG[i], 15);
-                        axCurrentPos[i]   = (mon[OffCurrentPos + 1] << 16) | (mon[OffCurrentPos] & 0xFFFF);
-                        axCurrentSpeed[i] = (mon[OffCurrentSpeed + 1] << 16) | (mon[OffCurrentSpeed] & 0xFFFF);
-                        axErrorCode[i]    = mon[OffErrorCode];
-                        axWarningCode[i]  = mon[OffWarningCode];
-                        axAxisStatus[i]   = mon[OffAxisStatus];
+                        try
+                        {
+                            if (isClosing) return;
+                            // Monitor area: G800..G814 (15 words)
+                            int[] mon = comm.ReadBuffer(0, MonitorBaseG[i], 15);
+                            axCurrentPos[i]   = (mon[OffCurrentPos + 1] << 16) | (mon[OffCurrentPos] & 0xFFFF);
+                            axCurrentSpeed[i] = (mon[OffCurrentSpeed + 1] << 16) | (mon[OffCurrentSpeed] & 0xFFFF);
+                            axErrorCode[i]    = mon[OffErrorCode];
+                            axWarningCode[i]  = mon[OffWarningCode];
+                            axAxisStatus[i]   = mon[OffAxisStatus];
 
-                        // Control area: G1500..G1519 (20 words)
-                        int[] ctl = plcComm.ReadBuffer(0, ControlBaseG[i], 20);
-                        axStartNo[i]     = ctl[OffStartNo];
-                        axErrorReset[i]  = ctl[OffErrorReset];
-                        axJogSpeed[i]    = (ctl[OffJogSpeed + 1] << 16) | (ctl[OffJogSpeed] & 0xFFFF);
-                        axNewSpeed[i]    = (ctl[OffNewSpeed + 1] << 16) | (ctl[OffNewSpeed] & 0xFFFF);
+                            // Control area: G1500..G1519 (20 words)
+                            int[] ctl = comm.ReadBuffer(0, ControlBaseG[i], 20);
+                            axStartNo[i]     = ctl[OffStartNo];
+                            axErrorReset[i]  = ctl[OffErrorReset];
+                            axJogSpeed[i]    = (ctl[OffJogSpeed + 1] << 16) | (ctl[OffJogSpeed] & 0xFFFF);
+                            axNewSpeed[i]    = (ctl[OffNewSpeed + 1] << 16) | (ctl[OffNewSpeed] & 0xFFFF);
+                        }
+                        catch
+                        {
+                            // Silently skip failed axis reads during polling
+                        }
                     }
-                    catch (Exception ex)
+
+                    // Read monitor rows on background thread too
+                    foreach (MonitorRow row in monitorRows)
                     {
-                        // Log exception to figure out why reading fails
-                        AddLogEntry("Telemetry", $"Axis {i+1} read failed: {ex.Message}", "error");
+                        try
+                        {
+                            if (isClosing) return;
+                            int value = comm.ReadDeviceValue(row.Register);
+                            row.Value = value.ToString(CultureInfo.InvariantCulture);
+                            row.Status = "OK";
+                        }
+                        catch (Exception ex)
+                        {
+                            row.Status = ex.Message;
+                        }
                     }
-                }
+                });
 
+                if (isClosing) return;
                 UpdateIntegrityState(true);
 
-                foreach (MonitorRow row in monitorRows)
+                // Push control state always; push telemetry only when viewing telemetry tab
+                await PushControlStateAsync();
+                if (currentView == "telemetry")
                 {
-                    int value = plcComm.ReadDeviceValue(row.Register);
-                    row.Value = value.ToString(CultureInfo.InvariantCulture);
-                    row.Status = "OK";
+                    await PushTelemetryStateAsync();
                 }
             }
             catch (Exception ex)
             {
-                UpdateIntegrityFault(ex.Message);
-                foreach (MonitorRow row in monitorRows)
+                if (!isClosing)
                 {
-                    row.Status = ex.Message;
+                    UpdateIntegrityFault(ex.Message);
                 }
             }
-
-            await PushControlStateAsync();
-            await PushTelemetryStateAsync();
+            finally
+            {
+                isPolling = false;
+            }
         }
 
         private void DisconnectPlc(bool updateUi = true)
@@ -1383,13 +1490,29 @@ namespace test1
 
         private async Task PostToUiAsync(string type, object payload)
         {
-            if (!webReady || webView.CoreWebView2 == null)
+            if (isClosing || !webReady)
             {
                 return;
             }
 
-            string json = serializer.Serialize(new { type, payload });
-            await webView.CoreWebView2.ExecuteScriptAsync("window.app && window.app.receive(" + json + ");");
+            try
+            {
+                if (webView == null || webView.IsDisposed || webView.CoreWebView2 == null)
+                {
+                    return;
+                }
+
+                string json = serializer.Serialize(new { type, payload });
+                await webView.CoreWebView2.ExecuteScriptAsync("window.app && window.app.receive(" + json + ");");
+            }
+            catch (ObjectDisposedException)
+            {
+                // WebView2 was disposed during close — ignore
+            }
+            catch (InvalidOperationException)
+            {
+                // WebView2 not in valid state — ignore
+            }
         }
 
         private static Dictionary<string, object> GetMap(Dictionary<string, object> source, string key)
@@ -1443,6 +1566,17 @@ namespace test1
                 : fallback;
         }
 
+        private static double GetDouble(Dictionary<string, object> source, string key, double fallback = 0.0)
+        {
+            object value;
+            if (source == null || !source.TryGetValue(key, out value) || value == null)
+            {
+                return fallback;
+            }
+            try { return Convert.ToDouble(value, CultureInfo.InvariantCulture); }
+            catch { return fallback; }
+        }
+
         private static string FormatPoint(CadDocumentService.CadPointData point)
         {
             return string.Format(CultureInfo.InvariantCulture, "{0:0.###}, {1:0.###}", point.X, point.Y);
@@ -1450,10 +1584,16 @@ namespace test1
 
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
+            // Set closing flag FIRST to stop all async operations immediately
+            isClosing = true;
+            webReady = false;
+
             plcPollTimer.Stop();
+            plcPollTimer.Tick -= PlcPollTimer_Tick;
+
             if (plcComm != null)
             {
-                plcComm.Dispose();
+                try { plcComm.Dispose(); } catch { }
                 plcComm = null;
             }
 
