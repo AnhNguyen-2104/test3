@@ -26,7 +26,7 @@ namespace test1
         private const int OffCurrentSpeed = 4;     // Current Speed (32-bit)
         private const int OffErrorCode = 6;        // Error Code (16-bit)
         private const int OffWarningCode = 7;      // Warning Code (16-bit)
-        private const int OffAxisStatus = 14;      // Axis Status (16-bit)
+        private const int OffAxisStatus = 9;       // Axis Status Md.26 (16-bit)
 
         // Control offsets (from ControlBaseG)
         private const int OffStartNo = 0;          // Start No. (16-bit)
@@ -139,7 +139,7 @@ namespace test1
             {
                 MessageBox.Show(
                     this,
-                    "Không khởi tạo được HTML dashboard. Hãy kiểm tra Microsoft Edge WebView2 Runtime." + Environment.NewLine + Environment.NewLine + ex.Message,
+                    "Failed to initialize HTML dashboard. Please check Microsoft Edge WebView2 Runtime." + Environment.NewLine + Environment.NewLine + ex.Message,
                     "WebView2",
                     MessageBoxButtons.OK,
                     MessageBoxIcon.Error);
@@ -182,18 +182,6 @@ namespace test1
 
                     case "setVelocity":
                         await HandleSetVelocityAsync(GetInt(payload, "value", 0));
-                        break;
-
-                    case "addRegister":
-                        await HandleAddRegisterAsync(GetString(payload, "register"));
-                        break;
-
-                    case "removeRegister":
-                        await HandleRemoveRegisterAsync(GetString(payload, "register"));
-                        break;
-
-                    case "setTelemetryWatchList":
-                        await HandleSetTelemetryWatchListAsync(payload);
                         break;
 
                     case "jogStart":
@@ -315,8 +303,8 @@ namespace test1
                 if (!plcComm.Connect())
                 {
                     UpdateConnectionState(false, "PLC disconnected");
-                    UpdateIntegrityFault("Kết nối PLC trả về lỗi.");
-                    await NotifyAsync("error", "PLC", "PLC connect trả về lỗi.");
+                    UpdateIntegrityFault("PLC connection returned an error.");
+                    await NotifyAsync("error", "PLC", "PLC connect returned an error.");
                     await PushControlStateAsync();
                     return;
                 }
@@ -325,7 +313,7 @@ namespace test1
                 UpdateIntegrityState(true);
                 plcPollTimer.Start();
                 await PushControlStateAsync();
-                await NotifyAsync("success", "PLC", "Kết nối PLC thành công.");
+                await NotifyAsync("success", "PLC", "PLC connected successfully.");
             }
             catch (Exception ex)
             {
@@ -409,7 +397,7 @@ namespace test1
                         case 4: dir = "Z+"; break;
                         case 5: dir = "Z-"; break;
                     }
-                    await NotifyAsync("info", "Jog", $"Bắt đầu Jog {dir} ({register})");
+                    await NotifyAsync("info", "Jog", $"Started Jog {dir} ({register})");
                 }
             }
             catch (Exception ex)
@@ -436,7 +424,7 @@ namespace test1
                 
                 if (active)
                 {
-                    await NotifyAsync("warning", "System", "Kích hoạt lệnh GO HOME (M502)");
+                    await NotifyAsync("warning", "System", "Activated GO HOME command (M502)");
                 }
             }
             catch (Exception ex)
@@ -463,7 +451,7 @@ namespace test1
                 
                 if (active)
                 {
-                    await NotifyAsync("success", "System", "Kích hoạt lệnh RESET ERROR (M300)");
+                    await NotifyAsync("success", "System", "Activated RESET ERROR command (M300)");
                 }
             }
             catch (Exception ex)
@@ -491,11 +479,11 @@ namespace test1
 
                 plcComm.WriteDeviceValue("D406", intVal);
                 AddLogEntry("D406", value.ToString("F3", CultureInfo.InvariantCulture), "Write", "OK", "SetJogSpeed(Float)");
-                await NotifyAsync("success", "Settings", $"Đã cập nhật tốc độ Jog (Real): {value:F3} (D406)");
+                await NotifyAsync("success", "Settings", $"Updated Jog speed (Real): {value:F3} (D406)");
             }
             catch (Exception ex)
             {
-                await NotifyAsync("error", "Settings", "Lỗi cập nhật tốc độ Jog: " + ex.Message);
+                await NotifyAsync("error", "Settings", "Error updating Jog speed: " + ex.Message);
             }
         }
 
@@ -508,7 +496,7 @@ namespace test1
                 AddLogEntry(EmergencyStopRegister, "1", "Write", "OK", "EmergencyStop");
                 UpdateIntegrityFault("Emergency stop triggered");
                 await PushControlStateAsync();
-                await NotifyAsync("error", "PLC", "Đã ghi emergency stop vào " + EmergencyStopRegister + ".");
+                await NotifyAsync("error", "PLC", "Emergency stop written to " + EmergencyStopRegister + ".");
             }
             catch (Exception ex)
             {
@@ -545,7 +533,7 @@ namespace test1
                     }
                     currentView = "dxf";
                     await PushDxfStateAsync();
-                    await NotifyAsync("success", "DXF", "Đã tải file DXF.");
+                    await NotifyAsync("success", "DXF", "Loaded DXF file.");
                 }
                 catch (Exception ex)
                 {
@@ -560,7 +548,7 @@ namespace test1
             var point = activeCadDocument?.Points?.FirstOrDefault(p => string.Equals(p.Key, pointKey, StringComparison.OrdinalIgnoreCase));
             if (point == null)
             {
-                await NotifyAsync("info", "DXF", "Hãy chọn một điểm trước khi gán.");
+                await NotifyAsync("info", "DXF", "Please select a point before assigning.");
                 return;
             }
 
@@ -593,7 +581,7 @@ namespace test1
             }
             
             await PushDxfStateAsync();
-            await NotifyAsync("success", "Cấu hình", $"Đã cập nhật {key} = {value}");
+            await NotifyAsync("success", "Configuration", $"Updated {key} = {value}");
         }
 
         private async Task HandleProcessRowValueAsync(int index, string field, string value)
@@ -821,6 +809,30 @@ namespace test1
             return mmMin.ToString("0.00", CultureInfo.InvariantCulture);
         }
 
+        private static string FormatAxisStatus(int status)
+        {
+            // Trạng thái từ Md.26 của trục
+            switch (status)
+            {
+                case -2: return "Step standby";
+                case -1: return "Error";
+                case 0: return "Standby";
+                case 1: return "Stopped";
+                case 2: return "Interpolation";
+                case 3: return "JOG operation";
+                case 4: return "Manual pulse generator";
+                case 5: return "Analyzing";
+                case 6: return "Special start standby";
+                case 7: return "OPR (Homing)";
+                case 8: return "Position control";
+                case 9: return "Speed control";
+                case 10: return "Speed ctrl (spd-pos)";
+                case 11: return "Pos ctrl (spd-pos)";
+                case 12: return "Pos ctrl (pos-spd)";
+                default: return $"Unknown ({status})";
+            }
+        }
+
         private Task PushControlStateAsync()
         {
             bool connected = plcComm != null && plcComm.IsConnected;
@@ -831,6 +843,11 @@ namespace test1
             {
                 int mb = MonitorBaseG[i];
                 int cb = ControlBaseG[i];
+
+                // Nếu `axAxisStatus[i]` có thể là số âm, ta xử lý ép kiểu bù 2 vì GetDevice trả về ushort qua COM.
+                int rawStatus = axAxisStatus[i];
+                if (rawStatus > 32767) rawStatus -= 65536;
+
                 axesData[i] = new
                 {
                     index = i + 1,
@@ -842,7 +859,7 @@ namespace test1
                     errorCodeAddr  = $"U0\\G{mb + OffErrorCode}",
                     warningCode    = connected ? axWarningCode[i].ToString(CultureInfo.InvariantCulture) : dash,
                     warningCodeAddr = $"U0\\G{mb + OffWarningCode}",
-                    axisStatus     = connected ? axAxisStatus[i].ToString(CultureInfo.InvariantCulture) : dash,
+                    axisStatus     = connected ? FormatAxisStatus(rawStatus) : dash,
                     axisStatusAddr = $"U0\\G{mb + OffAxisStatus}",
                     startNo        = connected ? axStartNo[i].ToString(CultureInfo.InvariantCulture) : dash,
                     startNoAddr    = $"U0\\G{cb + OffStartNo}",
@@ -1067,7 +1084,7 @@ namespace test1
             register = register.Trim().ToUpperInvariant();
             if (telemetryRegisters.Exists(r => string.Equals(r, register, StringComparison.OrdinalIgnoreCase)))
             {
-                await NotifyAsync("info", "Telemetry", "Register đã tồn tại.");
+                await NotifyAsync("info", "Telemetry", "Register already exists.");
                 return;
             }
 
@@ -1114,11 +1131,11 @@ namespace test1
                 AddLogEntry(path, value.ToString(CultureInfo.InvariantCulture), "Write", result == 0 ? "OK" : $"Error({result})", used);
                 if (result == 0)
                 {
-                    await NotifyAsync("success", "Telemetry", $"Ghi thành công {path} bằng {used}.");
+                    await NotifyAsync("success", "Telemetry", $"Successfully wrote to {path} using {used}.");
                 }
                 else
                 {
-                    await NotifyAsync("error", "Telemetry", $"Ghi thất bại ({result}) bằng {used}.");
+                    await NotifyAsync("error", "Telemetry", $"Failed to write ({result}) using {used}.");
                 }
             }
             catch (Exception ex)
@@ -1165,7 +1182,7 @@ namespace test1
 
             if (rowsToSend.Count == 0)
             {
-                await NotifyAsync("info", "Telemetry", "Không có điểm để gửi.");
+                await NotifyAsync("info", "Telemetry", "No points to send.");
                 return;
             }
 
@@ -1258,7 +1275,7 @@ namespace test1
                         string usedX;
                         int rX = plcComm.WriteInt32ToDevicePath(devicePosX, endX, out usedX);
                         AddLogEntry(devicePosX, endX.ToString(CultureInfo.InvariantCulture), "Write", rX == 0 ? "OK" : $"Error({rX})", usedX);
-                        if (rX != 0) await NotifyAsync("error", "Telemetry", $"Ghi End X thất bại {devicePosX}: {rX}");
+                        if (rX != 0) await NotifyAsync("error", "Telemetry", $"Failed to write End X {devicePosX}: {rX}");
                     }
 
                     // write center X
@@ -1268,7 +1285,7 @@ namespace test1
                         string usedCx;
                         int rCx = plcComm.WriteInt32ToDevicePath(deviceCenterX, centerX, out usedCx);
                         AddLogEntry(deviceCenterX, centerX.ToString(CultureInfo.InvariantCulture), "Write", rCx == 0 ? "OK" : $"Error({rCx})", usedCx);
-                        if (rCx != 0) await NotifyAsync("error", "Telemetry", $"Ghi Center X thất bại {deviceCenterX}: {rCx}");
+                        if (rCx != 0) await NotifyAsync("error", "Telemetry", $"Failed to write Center X {deviceCenterX}: {rCx}");
                     }
                 }
                 catch (Exception ex)
@@ -1280,21 +1297,21 @@ namespace test1
                 n++;
             }
 
-            await NotifyAsync("success", "Telemetry", "Đã gửi tọa độ trục X các điểm CAD xuống PLC.");
+            await NotifyAsync("success", "Telemetry", "Sent X-axis CAD coordinates to PLC.");
         }
 
         private async Task HandleImportCadToProcessAsync()
         {
             if (activeCadDocument == null || activeCadDocument.Primitives == null || activeCadDocument.Primitives.Count == 0)
             {
-                await NotifyAsync("info", "DXF", "Chưa có dữ liệu CAD.");
+                await NotifyAsync("info", "DXF", "No CAD data available.");
                 return;
             }
 
             var rows = BuildConnectedPathsFromCad();
             if (rows.Count == 0)
             {
-                await NotifyAsync("info", "DXF", "Không tìm thấy đường chạy nào hợp lệ.");
+                await NotifyAsync("info", "DXF", "No valid paths found.");
                 return;
             }
 
@@ -1317,11 +1334,11 @@ namespace test1
             {
                 if (glueStartCoord != null && string.Equals(row.EndCoordinate, glueStartCoord))
                 {
-                    row.MCodeValue = "Bật keo";
+                    row.MCodeValue = "1";
                 }
                 if (glueEndCoord != null && string.Equals(row.EndCoordinate, glueEndCoord))
                 {
-                    row.MCodeValue = "Tắt keo";
+                    row.MCodeValue = "2";
                 }
             }
 
@@ -1329,7 +1346,7 @@ namespace test1
             processRows.AddRange(rows);
 
             await PushDxfStateAsync();
-            await NotifyAsync("success", "DXF", $"Đã biên dịch {rows.Count} lệnh di chuyển vào bảng process.");
+            await NotifyAsync("success", "DXF", $"Compiled {rows.Count} movement commands into the process table.");
         }
 
         private List<ProcessRow> BuildConnectedPathsFromCad()

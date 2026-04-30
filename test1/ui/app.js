@@ -118,15 +118,15 @@ function bindEvents() {
 
   dom.openDxf.addEventListener("click", () => post("openDxf"));
   dom.assignButtons.forEach(b => b.addEventListener("click", () => {
-    if (!state.dxf.selectedPointKey) { showToast("info", "DXF", "Hãy chọn một điểm trước khi gán."); return; }
+    if (!state.dxf.selectedPointKey) { showToast("info", "DXF", "Please select a point before assigning."); return; }
     post("assignPoint", { slot: b.dataset.assignSlot, key: state.dxf.selectedPointKey });
   }));
   dom.processButtons.forEach(b => b.addEventListener("click", () => {
     const key = b.dataset.processKey;
     const row = state.dxf.processRows.find(i => i.key === key);
     const cv = key === "speed" ? (row ? row.speed : "") : (row ? row.mCodeValue : "");
-    const tm = { zDown: "Độ cao Z hạ", zSafe: "Độ cao Z an toàn", speed: "Tốc độ" };
-    openPrompt(tm[key] || "Input", "Nhập giá trị:", cv || "", v => post("setProcessValue", { key, value: v }));
+    const tm = { zDown: "Z down height", zSafe: "Z safe height", speed: "Speed" };
+    openPrompt(tm[key] || "Input", "Enter value:", cv || "", v => post("setProcessValue", { key, value: v }));
   }));
   dom.runButtons.forEach(b => b.addEventListener("click", () => post("runAction", { command: b.dataset.runAction })));
   dom.pointsBody.addEventListener("click", e => {
@@ -138,6 +138,24 @@ function bindEvents() {
     const input = e.target; if (input.tagName === "INPUT" && input.dataset.processIndex !== undefined)
       post("setProcessRowValue", { index: parseInt(input.dataset.processIndex, 10), field: input.dataset.processField, value: input.value.trim() });
   });
+
+  const addTelemetryBtn = document.getElementById("telemetry-add-btn");
+  if (addTelemetryBtn) {
+    addTelemetryBtn.addEventListener("click", () => {
+      const path = document.getElementById("telemetry-add-path").value.trim();
+      if (!path) return;
+      const len = parseInt(document.getElementById("telemetry-add-len").value, 10) || 1;
+      if (path.toUpperCase().includes("U") && path.toUpperCase().includes("\\G")) {
+        post("addTelemetryBuffer", { path, length: len });
+      } else {
+        post("addTelemetryRegister", { register: path });
+      }
+      document.getElementById("telemetry-add-path").value = "";
+    });
+  }
+
+  window.removeReg = (reg) => { post("removeTelemetryRegister", { register: reg }); };
+  window.removeBuf = (path) => { post("removeTelemetryBuffer", { path: path }); };
 
   // CAD pan/zoom
   dom.cadPreview.addEventListener("click", e => {
@@ -301,8 +319,8 @@ function renderPointsTable() {
   for (const prim of primitives) {
     if (!prim.points || !prim.points.length) continue;
     let dt = "Line";
-    if ((prim.sourceType || "").toLowerCase().includes("arc")) dt = "Cung tròn";
-    if ((prim.sourceType || "").toLowerCase().includes("circle")) dt = "Hình tròn";
+    if ((prim.sourceType || "").toLowerCase().includes("arc")) dt = "Arc";
+    if ((prim.sourceType || "").toLowerCase().includes("circle")) dt = "Circle";
     let cx = "", cy = "";
     if (prim.center) { cx = Number(prim.center.x).toFixed(3); cy = Number(prim.center.y).toFixed(3); }
     if (dt === "Line") {
@@ -341,17 +359,37 @@ function renderTelemetry() {
   if (dom.writeBufferButton) dom.writeBufferButton.disabled = !connected;
   const sendBtn = document.getElementById("send-cad-x-button"); if (sendBtn) sendBtn.disabled = !connected;
   if (!dom.telemetryContent) return;
+  
   const rows = [`<div class="telemetry-header">Telemetry (${connected ? "connected" : "disconnected"})</div>`];
+  
   if (dValues.length) {
-    rows.push('<div class="telemetry-section"><div class="telemetry-title">D registers</div><table class="telemetry-table"><thead><tr><th>Register</th><th>Value</th><th>Status</th></tr></thead><tbody>');
-    dValues.forEach(i => rows.push(`<tr><td>${esc(i.register || "")}</td><td>${esc(i.value != null ? String(i.value) : "")}</td><td>${esc(i.ok ? "OK" : (i.error || "ERR"))}</td></tr>`));
+    rows.push('<div class="telemetry-section"><div class="telemetry-title">D registers</div><table class="telemetry-table data-table compact"><thead><tr><th>Register</th><th>Value</th><th>Status</th><th style="width: 40px"></th></tr></thead><tbody>');
+    dValues.forEach(i => {
+      const reg = esc(i.register || "");
+      const val = esc(i.value != null ? String(i.value) : "");
+      const stat = esc(i.ok ? "OK" : (i.error || "ERR"));
+      const oc = `onclick="document.getElementById('write-buffer-path').value='${reg}'; document.getElementById('write-buffer-value').value='${val}'; document.getElementById('write-buffer-value').focus(); document.getElementById('write-buffer-value').select();"`;
+      const delBtn = `<button class="secondary-button compact" style="padding: 2px 6px" onclick="event.stopPropagation(); window.removeReg('${reg}')">X</button>`;
+      rows.push(`<tr ${oc} style="cursor:pointer" title="Click to overwrite"><td>${reg}</td><td>${val}</td><td>${stat}</td><td>${delBtn}</td></tr>`);
+    });
     rows.push("</tbody></table></div>");
   }
+  
   if (buffers.length) {
-    rows.push('<div class="telemetry-section"><div class="telemetry-title">Buffers (Un\\Gx)</div>');
-    buffers.forEach(b => { const v = (b.values || []).map(v => esc(String(v))).join(", "); rows.push(`<div class="telemetry-buffer"><div class="buffer-path">${esc(b.path || "")}</div><div class="buffer-values">[${v}]</div><div class="buffer-status">${b.ok ? "OK" : (b.error || "ERR")}</div></div>`); });
-    rows.push("</div>");
+    rows.push('<div class="telemetry-section"><div class="telemetry-title">Buffers (Un\\Gx)</div><table class="telemetry-table data-table compact"><thead><tr><th>Buffer Path</th><th>Values</th><th>Status</th><th style="width: 40px"></th></tr></thead><tbody>');
+    buffers.forEach(b => { 
+      const path = esc(b.path || "");
+      const vArr = b.values || [];
+      const v = vArr.map(val => esc(String(val))).join(", ");
+      const stat = esc(b.ok ? "OK" : (b.error || "ERR"));
+      const firstVal = vArr.length > 0 ? esc(String(vArr[0])) : "";
+      const oc = `onclick="document.getElementById('write-buffer-path').value='${path}'; document.getElementById('write-buffer-value').value='${firstVal}'; document.getElementById('write-buffer-value').focus(); document.getElementById('write-buffer-value').select();"`;
+      const delBtn = `<button class="secondary-button compact" style="padding: 2px 6px" onclick="event.stopPropagation(); window.removeBuf('${path}')">X</button>`;
+      rows.push(`<tr ${oc} style="cursor:pointer" title="Click to overwrite (first value)"><td>${path}</td><td style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">[${v}]</td><td>${stat}</td><td>${delBtn}</td></tr>`);
+    });
+    rows.push("</tbody></table></div>");
   }
+  
   dom.telemetryContent.innerHTML = rows.join("");
 }
 

@@ -144,7 +144,7 @@
           <div class="panel-header">
             <div>
               <div class="panel-title">Logs</div>
-              <div class="panel-subtitle">Các giao dịch đọc/ghi PLC</div>
+              <div class="panel-subtitle">PLC read/write transactions</div>
             </div>
             <div>
               <button id="clear-logs-button" class="text-button">Clear</button>
@@ -179,15 +179,16 @@
               <div class="panel-subtitle">Live D registers and Un\\Gx buffers</div>
             </div>
           </div>
-
+          
           <div class="telemetry-actions" style="margin-bottom: 12px; display:flex; gap:8px; align-items:center;">
-            <input id="telemetry-watch-input" class="text-input compact" type="text" placeholder="D100, M10, U0\G800..." value="U0\G800, U0\G900, U0\G1000, U0\G1100" style="flex: 1;" />
-            <button id="telemetry-watch-btn" class="primary-button compact">Update Watch List</button>
+            <input id="telemetry-add-path" class="text-input compact" type="text" placeholder="Add address: D100, M10, U0\G800..." style="flex: 1;" />
+            <input id="telemetry-add-len" class="text-input compact" type="number" placeholder="Length (if U\G)" value="1" style="width: 130px;" />
+            <button id="telemetry-add-btn" class="primary-button compact">Add to List</button>
           </div>
 
           <div id="telemetry-content" class="telemetry-content">
             <!-- content populated by app.js renderTelemetry() -->
-            <div class="telemetry-empty">Không có dữ liệu telemetry. Kết nối PLC để kích hoạt.</div>
+            <div class="telemetry-empty">No telemetry data. Connect PLC to activate.</div>
           </div>
 
           <div class="telemetry-actions" style="margin-top:12px; display:flex; gap:8px; align-items:center;">
@@ -204,10 +205,10 @@
       <section id="view-dxf" class="view">
         <div class="panel dxf-toolbar">
           <div class="toolbar-field toolbar-path">
-            <input id="cad-path" class="text-input compact" type="text" placeholder="Đường dẫn cad" readonly>
+            <input id="cad-path" class="text-input compact" type="text" placeholder="CAD path" readonly>
           </div>
           <div class="toolbar-field toolbar-file">
-            <input id="cad-file" class="text-input compact" type="text" placeholder="Tên file" readonly>
+            <input id="cad-file" class="text-input compact" type="text" placeholder="File name" readonly>
           </div>
           <button id="open-dxf" class="primary-button toolbar-open compact">Open</button>
         </div>
@@ -221,12 +222,12 @@
 
             <div class="dxf-actions">
               <div class="action-row">
-                <button class="primary-button" data-assign-slot="start">Điểm bắt đầu</button>
-                <button class="primary-button" data-assign-slot="glueStart">Bắt đầu bơm keo</button>
-                <button class="primary-button" data-assign-slot="glueEnd">Kết thúc bơm keo</button>
-                <button class="primary-button" data-process-key="zDown">Z hạ</button>
-                <button class="primary-button" data-process-key="zSafe">Z an toàn</button>
-                <button class="primary-button" data-process-key="speed">Tốc độ</button>
+                <button class="primary-button" data-assign-slot="start">Start point</button>
+                <button class="primary-button" data-assign-slot="glueStart">Start gluing</button>
+                <button class="primary-button" data-assign-slot="glueEnd">End gluing</button>
+                <button class="primary-button" data-process-key="zDown">Z down</button>
+                <button class="primary-button" data-process-key="zSafe">Z safe</button>
+                <button class="primary-button" data-process-key="speed">Speed</button>
               </div>
               <div class="action-row">
                 <button id="import-cad-to-process-button" class="primary-button">Import CAD → Process</button>
@@ -243,14 +244,14 @@
               <table class="data-table compact points-table">
                 <thead>
                   <tr>
-                    <th>STT</th>
-                    <th>Loại đường</th>
-                    <th>Bắt đầu X</th>
-                    <th>Bắt đầu Y</th>
-                    <th>Kết thúc X</th>
-                    <th>Kết thúc Y</th>
-                    <th>Tâm X</th>
-                    <th>Tâm Y</th>
+                    <th>No.</th>
+                    <th>Line type</th>
+                    <th>Start X</th>
+                    <th>Start Y</th>
+                    <th>End X</th>
+                    <th>End Y</th>
+                    <th>Center X</th>
+                    <th>Center Y</th>
                   </tr>
                 </thead>
                 <tbody id="points-table-body"></tbody>
@@ -263,12 +264,12 @@
               <table class="data-table compact">
                 <thead>
                   <tr>
-                    <th>Loại chuyển động</th>
-                    <th>Giá trị M code</th>
+                    <th>Motion type</th>
+                    <th>M code value</th>
                     <th>Dwell</th>
-                    <th>Tốc độ</th>
-                    <th>Tọa độ cuối (X;Y)</th>
-                    <th>Tọa độ tâm (X;Y)</th>
+                    <th>Speed</th>
+                    <th>End coord (X;Y)</th>
+                    <th>Center coord (X;Y)</th>
                   </tr>
                 </thead>
                 <tbody id="process-table-body"></tbody>
@@ -278,9 +279,9 @@
             <!-- Instruction / Notes area added -->
             <div class="dxf-notes"
               style="margin-top: 12px; font-size: 12px; color: var(--muted); display: flex; gap: 20px;">
-              <strong>Giá trị M code:</strong>
-              <span>M code = 1 (Bật bơm keo)</span>
-              <span>M code = 2 (Dừng bơm keo)</span>
+              <strong>M code value:</strong>
+              <span>M code = 1 (Dispense ON)</span>
+              <span>M code = 2 (Dispense OFF)</span>
             </div>
 
           </div>
