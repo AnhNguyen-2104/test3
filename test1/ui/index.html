@@ -95,6 +95,7 @@
               <label class="field-label" for="plc-station">LOGICAL STATION NO.</label>
               <input id="plc-station" class="text-input" type="number" value="0">
               <button id="connect-button" class="primary-button full-width connect-btn-q">CONNECT PLC Q</button>
+              <button id="go-home-btn" class="primary-button full-width" style="margin-top: 8px; background-color: var(--warning-color, #eab308); color: black; border: none;">GO HOME (M502)</button>
             </div>
 
             <div id="connection-meta" class="muted-text" style="margin-top:12px;">MX Component logical station: 0</div>
@@ -105,115 +106,11 @@
             <div class="panel-header">
               <div>
                 <div class="panel-title">Axis Monitor</div>
-                <div class="panel-subtitle">Md.20 Command Position · Md.21 Actual Position · Md.22 Command Speed · Md.28
-                  Actual Speed</div>
+                <div class="panel-subtitle">Position · Speed · Error Code · Warning · Status · Start No. · JOG Speed · New Speed</div>
               </div>
             </div>
             <div class="axis-grid" id="axis-grid">
-              <!-- Axis 1 -->
-              <div class="axis-card">
-                <div class="axis-header accent-axis-1">AXIS 1</div>
-                <div class="axis-body">
-                  <div class="axis-field">
-                    <div class="axis-field-label">COMMAND POSITION <span class="axis-md">(Md.20)</span></div>
-                    <div class="axis-field-value" id="axis1-md20">--</div>
-                  </div>
-                  <div class="axis-field">
-                    <div class="axis-field-label">ACTUAL POSITION <span class="axis-md">(Md.21)</span></div>
-                    <div class="axis-field-value" id="axis1-md21">--</div>
-                  </div>
-                  <div class="axis-field">
-                    <div class="axis-field-label">COMMAND SPEED <span class="axis-md">(Md.22)</span></div>
-                    <div class="axis-field-value" id="axis1-md22">--</div>
-                  </div>
-                  <div class="axis-field">
-                    <div class="axis-field-label">ACTUAL SPEED <span class="axis-md">(Md.28)</span></div>
-                    <div class="axis-field-value" id="axis1-md28">--</div>
-                  </div>
-                  <div class="axis-running-point" id="axis1-rp-bar">
-                    <span class="rp-label">RUNNING POINT <span class="axis-md">(Md.44)</span></span>
-                    <span class="rp-value" id="axis1-md44">--</span>
-                  </div>
-                </div>
-              </div>
-              <!-- Axis 2 -->
-              <div class="axis-card">
-                <div class="axis-header accent-axis-2">AXIS 2</div>
-                <div class="axis-body">
-                  <div class="axis-field">
-                    <div class="axis-field-label">COMMAND POSITION <span class="axis-md">(Md.20)</span></div>
-                    <div class="axis-field-value" id="axis2-md20">--</div>
-                  </div>
-                  <div class="axis-field">
-                    <div class="axis-field-label">ACTUAL POSITION <span class="axis-md">(Md.21)</span></div>
-                    <div class="axis-field-value" id="axis2-md21">--</div>
-                  </div>
-                  <div class="axis-field">
-                    <div class="axis-field-label">COMMAND SPEED <span class="axis-md">(Md.22)</span></div>
-                    <div class="axis-field-value" id="axis2-md22">--</div>
-                  </div>
-                  <div class="axis-field">
-                    <div class="axis-field-label">ACTUAL SPEED <span class="axis-md">(Md.28)</span></div>
-                    <div class="axis-field-value" id="axis2-md28">--</div>
-                  </div>
-                  <div class="axis-running-point" id="axis2-rp-bar">
-                    <span class="rp-label">RUNNING POINT <span class="axis-md">(Md.44)</span></span>
-                    <span class="rp-value" id="axis2-md44">--</span>
-                  </div>
-                </div>
-              </div>
-              <!-- Axis 3 -->
-              <div class="axis-card">
-                <div class="axis-header accent-axis-3">AXIS 3</div>
-                <div class="axis-body">
-                  <div class="axis-field">
-                    <div class="axis-field-label">COMMAND POSITION <span class="axis-md">(Md.20)</span></div>
-                    <div class="axis-field-value" id="axis3-md20">--</div>
-                  </div>
-                  <div class="axis-field">
-                    <div class="axis-field-label">ACTUAL POSITION <span class="axis-md">(Md.21)</span></div>
-                    <div class="axis-field-value" id="axis3-md21">--</div>
-                  </div>
-                  <div class="axis-field">
-                    <div class="axis-field-label">COMMAND SPEED <span class="axis-md">(Md.22)</span></div>
-                    <div class="axis-field-value" id="axis3-md22">--</div>
-                  </div>
-                  <div class="axis-field">
-                    <div class="axis-field-label">ACTUAL SPEED <span class="axis-md">(Md.28)</span></div>
-                    <div class="axis-field-value" id="axis3-md28">--</div>
-                  </div>
-                  <div class="axis-running-point" id="axis3-rp-bar">
-                    <span class="rp-label">RUNNING POINT <span class="axis-md">(Md.44)</span></span>
-                    <span class="rp-value" id="axis3-md44">--</span>
-                  </div>
-                </div>
-              </div>
-              <!-- Axis 4 -->
-              <div class="axis-card">
-                <div class="axis-header accent-axis-4">AXIS 4</div>
-                <div class="axis-body">
-                  <div class="axis-field">
-                    <div class="axis-field-label">COMMAND POSITION <span class="axis-md">(Md.20)</span></div>
-                    <div class="axis-field-value" id="axis4-md20">--</div>
-                  </div>
-                  <div class="axis-field">
-                    <div class="axis-field-label">ACTUAL POSITION <span class="axis-md">(Md.21)</span></div>
-                    <div class="axis-field-value" id="axis4-md21">--</div>
-                  </div>
-                  <div class="axis-field">
-                    <div class="axis-field-label">COMMAND SPEED <span class="axis-md">(Md.22)</span></div>
-                    <div class="axis-field-value" id="axis4-md22">--</div>
-                  </div>
-                  <div class="axis-field">
-                    <div class="axis-field-label">ACTUAL SPEED <span class="axis-md">(Md.28)</span></div>
-                    <div class="axis-field-value" id="axis4-md28">--</div>
-                  </div>
-                  <div class="axis-running-point" id="axis4-rp-bar">
-                    <span class="rp-label">RUNNING POINT <span class="axis-md">(Md.44)</span></span>
-                    <span class="rp-value" id="axis4-md44">--</span>
-                  </div>
-                </div>
-              </div>
+              <!-- Generated dynamically by app.js -->
             </div>
           </div>
 
@@ -273,6 +170,11 @@
               <div class="panel-title">Telemetry</div>
               <div class="panel-subtitle">Live D registers and Un\\Gx buffers</div>
             </div>
+          </div>
+
+          <div class="telemetry-actions" style="margin-bottom: 12px; display:flex; gap:8px; align-items:center;">
+            <input id="telemetry-watch-input" class="text-input compact" type="text" placeholder="D100, M10, U0\G800..." value="U0\G800, U0\G900, U0\G1000, U0\G1100" style="flex: 1;" />
+            <button id="telemetry-watch-btn" class="primary-button compact">Update Watch List</button>
           </div>
 
           <div id="telemetry-content" class="telemetry-content">

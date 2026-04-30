@@ -9,6 +9,7 @@ namespace test1
     {
         private dynamic plcDevice;
         private bool isConnected = false;
+        private readonly object commLock = new object();
 
         public string IPAddress { get; set; }
         public int Port { get; set; } = 2000;
@@ -89,16 +90,21 @@ namespace test1
 
             try
             {
-                short[] outBuf = new short[count];
-                // attempt to call COM ReadBuffer: signature may vary by MX version
-                int result = plcDevice.ReadBuffer(startIO, address, count, ref outBuf[0]);
-                if (result != 0)
-                {
-                    throw new Exception($"ReadBuffer returned code: {result}");
-                }
-
                 int[] ints = new int[count];
-                for (int i = 0; i < count; i++) ints[i] = outBuf[i];
+                lock (commLock)
+                {
+                    for (int i = 0; i < count; i++)
+                    {
+                        string devName = $"U{startIO:X}\\G{address + i}";
+                        int value = 0;
+                        int result = plcDevice.GetDevice(devName, out value);
+                        if (result != 0)
+                        {
+                            throw new Exception($"GetDevice {devName} failed: {result:X}");
+                        }
+                        ints[i] = value;
+                    }
+                }
                 return ints;
             }
             catch (Exception ex)

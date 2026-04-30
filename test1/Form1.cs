@@ -16,13 +16,24 @@ namespace test1
     public partial class Form1 : Form
     {
         // QD75 Positioning Module Buffer Memory Addresses
-        // Axis base: Axis1=G800, Axis2=G900, Axis3=G1000, Axis4=G1100
-        private static readonly int[] AxisBaseG = { 800, 900, 1000, 1100 };
-        private const int OffsetMd20 = 0;   // Command Position (32-bit)
-        private const int OffsetMd21 = 2;   // Actual Position (32-bit)
-        private const int OffsetMd22 = 4;   // Command Speed (32-bit)
-        private const int OffsetMd28 = 12;  // Actual Speed (32-bit)
-        private const int OffsetMd44 = 35;  // Positioning Data No. (16-bit)
+        // Monitor base: Axis1=G800, Axis2=G900, Axis3=G1000, Axis4=G1100
+        private static readonly int[] MonitorBaseG = { 800, 900, 1000, 1100 };
+        // Control base: Axis1=G1500, Axis2=G1600, Axis3=G1700, Axis4=G1800
+        private static readonly int[] ControlBaseG = { 1500, 1600, 1700, 1800 };
+
+        // Monitor offsets (from MonitorBaseG)
+        private const int OffCurrentPos = 0;      // Current Feed Value (32-bit)
+        private const int OffCurrentSpeed = 4;     // Current Speed (32-bit)
+        private const int OffErrorCode = 6;        // Error Code (16-bit)
+        private const int OffWarningCode = 7;      // Warning Code (16-bit)
+        private const int OffAxisStatus = 14;      // Axis Status (16-bit)
+
+        // Control offsets (from ControlBaseG)
+        private const int OffStartNo = 0;          // Start No. (16-bit)
+        private const int OffErrorReset = 2;       // Error Reset (16-bit)
+        private const int OffJogSpeed = 4;         // JOG Speed (32-bit)
+        private const int OffNewSpeed = 18;        // New Speed Value (32-bit)
+
         private const string JogBaseRegister = "M3000";
         private const string EmergencyStopRegister = "M3100";
 
@@ -43,12 +54,16 @@ namespace test1
         private readonly List<string> telemetryRegisters = new List<string> { "U0\\G800", "U0\\G900", "U0\\G1000", "U0\\G1100" };
         private readonly List<TelemetryBuffer> telemetryBuffers = new List<TelemetryBuffer> { new TelemetryBuffer { Path = "U0\\G2006", Length = 2 } };
 
-        // Axis monitor data (4 axes)
-        private readonly int[] md20Values = new int[4]; // Command position
-        private readonly int[] md21Values = new int[4]; // Actual position
-        private readonly int[] md22Values = new int[4]; // Command speed
-        private readonly int[] md28Values = new int[4]; // Actual speed
-        private readonly int[] md44Values = new int[4]; // Running point
+        // Axis data (4 axes)
+        private readonly int[] axCurrentPos = new int[4];
+        private readonly int[] axCurrentSpeed = new int[4];
+        private readonly int[] axErrorCode = new int[4];
+        private readonly int[] axWarningCode = new int[4];
+        private readonly int[] axAxisStatus = new int[4];
+        private readonly int[] axStartNo = new int[4];
+        private readonly int[] axErrorReset = new int[4];
+        private readonly int[] axJogSpeed = new int[4];
+        private readonly int[] axNewSpeed = new int[4];
         private int logicalStation = 0;
 
         // simple in-memory log store for PLC I/O operations
@@ -174,12 +189,24 @@ namespace test1
                         await HandleRemoveRegisterAsync(GetString(payload, "register"));
                         break;
 
+                    case "setTelemetryWatchList":
+                        await HandleSetTelemetryWatchListAsync(payload);
+                        break;
+
                     case "jogStart":
                         await HandleJogWriteAsync(GetInt(payload, "offset", -1), true);
                         break;
 
                     case "jogStop":
                         await HandleJogWriteAsync(GetInt(payload, "offset", -1), false);
+                        break;
+
+                    case "goHomeStart":
+                        await HandleGoHomeWriteAsync(true);
+                        break;
+
+                    case "goHomeStop":
+                        await HandleGoHomeWriteAsync(false);
                         break;
 
                     case "emergencyStop":
@@ -301,6 +328,22 @@ namespace test1
             await PushControlStateAsync();
         }
 
+        private async Task HandleSetTelemetryWatchListAsync(Dictionary<string, object> payload)
+        {
+            if (payload.TryGetValue("registers", out object regsObj) && regsObj is object[] regsArr)
+            {
+                telemetryRegisters.Clear();
+                foreach (var r in regsArr)
+                {
+                    if (r is string s && !string.IsNullOrWhiteSpace(s))
+                    {
+                        telemetryRegisters.Add(s.Trim().ToUpperInvariant());
+                    }
+                }
+                await PushTelemetryStateAsync();
+            }
+        }
+
         private async Task HandleAddRegisterAsync(string register)
         {
             register = (register ?? string.Empty).Trim().ToUpperInvariant();
@@ -309,31 +352,19 @@ namespace test1
                 return;
             }
 
-            if (monitorRows.Any(row => string.Equals(row.Register, register, StringComparison.OrdinalIgnoreCase)))
+            if (!telemetryRegisters.Contains(register))
             {
-                await NotifyAsync("info", "Monitor", "Thanh ghi đã tồn tại trong danh sách theo dõi.");
-                return;
+                telemetryRegisters.Add(register);
+                await PushTelemetryStateAsync();
             }
-
-            monitorRows.Add(new MonitorRow
-            {
-                Register = register,
-                Value = "-",
-                Status = plcComm != null && plcComm.IsConnected ? "Pending" : "Disconnected"
-            });
-            await PushControlStateAsync();
         }
 
         private async Task HandleRemoveRegisterAsync(string register)
         {
-            MonitorRow row = monitorRows.FirstOrDefault(item => string.Equals(item.Register, register, StringComparison.OrdinalIgnoreCase));
-            if (row == null)
+            if (telemetryRegisters.Remove(register))
             {
-                return;
+                await PushTelemetryStateAsync();
             }
-
-            monitorRows.Remove(row);
-            await PushControlStateAsync();
         }
 
         private async Task HandleJogWriteAsync(int offset, bool active)
@@ -359,6 +390,28 @@ namespace test1
                     UpdateIntegrityFault(ex.Message);
                     AddLogEntry(JogBaseRegister, (active ? 1 : 0).ToString(CultureInfo.InvariantCulture), "Write", "Error", ex.Message);
                     await NotifyAsync("error", "Jog", ex.Message);
+                    await PushControlStateAsync();
+                }
+            }
+        }
+
+        private async Task HandleGoHomeWriteAsync(bool active)
+        {
+            try
+            {
+                EnsureConnected();
+                int v = active ? 1 : 0;
+                plcComm.WriteDeviceValue("M502", v);
+                UpdateIntegrityState(true);
+                AddLogEntry("M502", v.ToString(CultureInfo.InvariantCulture), "Write", "OK", "GoHome");
+            }
+            catch (Exception ex)
+            {
+                if (active)
+                {
+                    UpdateIntegrityFault(ex.Message);
+                    AddLogEntry("M502", (active ? 1 : 0).ToString(CultureInfo.InvariantCulture), "Write", "Error", ex.Message);
+                    await NotifyAsync("error", "Go Home", ex.Message);
                     await PushControlStateAsync();
                 }
             }
@@ -493,24 +546,30 @@ namespace test1
 
             try
             {
-                // Read all 4 axes monitor data
+                // Read all 4 axes: monitor area (15 words) + control area (20 words)
                 for (int i = 0; i < 4; i++)
                 {
-                    int baseAddr = AxisBaseG[i];
                     try
                     {
-                        // Đọc 1 lần 36 words (từ G800 đến G835) để giảm delay giao tiếp
-                        int[] buffer = plcComm.ReadBuffer(0, baseAddr, 36);
-                        
-                        md20Values[i] = (buffer[OffsetMd20 + 1] << 16) | (buffer[OffsetMd20] & 0xFFFF);
-                        md21Values[i] = (buffer[OffsetMd21 + 1] << 16) | (buffer[OffsetMd21] & 0xFFFF);
-                        md22Values[i] = (buffer[OffsetMd22 + 1] << 16) | (buffer[OffsetMd22] & 0xFFFF);
-                        md28Values[i] = (buffer[OffsetMd28 + 1] << 16) | (buffer[OffsetMd28] & 0xFFFF);
-                        md44Values[i] = buffer[OffsetMd44];
+                        // Monitor area: G800..G814 (15 words)
+                        int[] mon = plcComm.ReadBuffer(0, MonitorBaseG[i], 15);
+                        axCurrentPos[i]   = (mon[OffCurrentPos + 1] << 16) | (mon[OffCurrentPos] & 0xFFFF);
+                        axCurrentSpeed[i] = (mon[OffCurrentSpeed + 1] << 16) | (mon[OffCurrentSpeed] & 0xFFFF);
+                        axErrorCode[i]    = mon[OffErrorCode];
+                        axWarningCode[i]  = mon[OffWarningCode];
+                        axAxisStatus[i]   = mon[OffAxisStatus];
+
+                        // Control area: G1500..G1519 (20 words)
+                        int[] ctl = plcComm.ReadBuffer(0, ControlBaseG[i], 20);
+                        axStartNo[i]     = ctl[OffStartNo];
+                        axErrorReset[i]  = ctl[OffErrorReset];
+                        axJogSpeed[i]    = (ctl[OffJogSpeed + 1] << 16) | (ctl[OffJogSpeed] & 0xFFFF);
+                        axNewSpeed[i]    = (ctl[OffNewSpeed + 1] << 16) | (ctl[OffNewSpeed] & 0xFFFF);
                     }
-                    catch
+                    catch (Exception ex)
                     {
-                        // Individual axis read failure - keep previous values
+                        // Log exception to figure out why reading fails
+                        AddLogEntry("Telemetry", $"Axis {i+1} read failed: {ex.Message}", "error");
                     }
                 }
 
@@ -635,35 +694,37 @@ namespace test1
             return mm.ToString("0.0000", CultureInfo.InvariantCulture);
         }
 
-        /// <summary>
-        /// Format Md.44 value: 0=Idle, 1-600=Point N, 9001/9002=OPR, 9003=Pos Change
-        /// </summary>
-        private static string FormatMd44(int value)
-        {
-            if (value == 0) return "--";
-            if (value >= 1 && value <= 600) return value.ToString(CultureInfo.InvariantCulture);
-            if (value == 9001 || value == 9002) return "OPR";
-            if (value == 9003) return "CHG";
-            return value.ToString(CultureInfo.InvariantCulture);
-        }
-
         private Task PushControlStateAsync()
         {
             bool connected = plcComm != null && plcComm.IsConnected;
+            string dash = "--";
 
             var axesData = new object[4];
             for (int i = 0; i < 4; i++)
             {
-                bool md44Active = md44Values[i] > 0 && md44Values[i] <= 600;
+                int mb = MonitorBaseG[i];
+                int cb = ControlBaseG[i];
                 axesData[i] = new
                 {
                     index = i + 1,
-                    md20 = connected ? FormatPositionMm(md20Values[i]) : "--",
-                    md21 = connected ? FormatPositionMm(md21Values[i]) : "--",
-                    md22 = connected ? md22Values[i].ToString(CultureInfo.InvariantCulture) : "--",
-                    md28 = connected ? md28Values[i].ToString(CultureInfo.InvariantCulture) : "--",
-                    md44 = connected ? FormatMd44(md44Values[i]) : "--",
-                    md44Active
+                    currentPos     = connected ? FormatPositionMm(axCurrentPos[i]) : dash,
+                    currentPosAddr = $"U0\\G{mb}",
+                    currentSpeed   = connected ? axCurrentSpeed[i].ToString(CultureInfo.InvariantCulture) : dash,
+                    currentSpeedAddr = $"U0\\G{mb + OffCurrentSpeed}",
+                    errorCode      = connected ? axErrorCode[i].ToString(CultureInfo.InvariantCulture) : dash,
+                    errorCodeAddr  = $"U0\\G{mb + OffErrorCode}",
+                    warningCode    = connected ? axWarningCode[i].ToString(CultureInfo.InvariantCulture) : dash,
+                    warningCodeAddr = $"U0\\G{mb + OffWarningCode}",
+                    axisStatus     = connected ? axAxisStatus[i].ToString(CultureInfo.InvariantCulture) : dash,
+                    axisStatusAddr = $"U0\\G{mb + OffAxisStatus}",
+                    startNo        = connected ? axStartNo[i].ToString(CultureInfo.InvariantCulture) : dash,
+                    startNoAddr    = $"U0\\G{cb + OffStartNo}",
+                    errorReset     = connected ? axErrorReset[i].ToString(CultureInfo.InvariantCulture) : dash,
+                    errorResetAddr = $"U0\\G{cb + OffErrorReset}",
+                    jogSpeed       = connected ? axJogSpeed[i].ToString(CultureInfo.InvariantCulture) : dash,
+                    jogSpeedAddr   = $"U0\\G{cb + OffJogSpeed}",
+                    newSpeed       = connected ? axNewSpeed[i].ToString(CultureInfo.InvariantCulture) : dash,
+                    newSpeedAddr   = $"U0\\G{cb + OffNewSpeed}"
                 };
             }
 

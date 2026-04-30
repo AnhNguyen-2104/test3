@@ -4,10 +4,10 @@ const state = {
   control: {
     connection: { connected: false, station: 0, banner: "PLC disconnected", meta: "MX Component logical station: 0", buttonText: "CONNECT PLC Q" },
     axes: [
-      { index:1, md20:"--", md21:"--", md22:"--", md28:"--", md44:"--", md44Active:false },
-      { index:2, md20:"--", md21:"--", md22:"--", md28:"--", md44:"--", md44Active:false },
-      { index:3, md20:"--", md21:"--", md22:"--", md28:"--", md44:"--", md44Active:false },
-      { index:4, md20:"--", md21:"--", md22:"--", md28:"--", md44:"--", md44Active:false }
+      { index:1, currentPos:"--", currentSpeed:"--", errorCode:"--", warningCode:"--", axisStatus:"--", startNo:"--", errorReset:"--", jogSpeed:"--", newSpeed:"--" },
+      { index:2, currentPos:"--", currentSpeed:"--", errorCode:"--", warningCode:"--", axisStatus:"--", startNo:"--", errorReset:"--", jogSpeed:"--", newSpeed:"--" },
+      { index:3, currentPos:"--", currentSpeed:"--", errorCode:"--", warningCode:"--", axisStatus:"--", startNo:"--", errorReset:"--", jogSpeed:"--", newSpeed:"--" },
+      { index:4, currentPos:"--", currentSpeed:"--", errorCode:"--", warningCode:"--", axisStatus:"--", startNo:"--", errorReset:"--", jogSpeed:"--", newSpeed:"--" }
     ],
     events: []
   },
@@ -55,6 +55,8 @@ function cacheDom() {
   dom.runButtons = Array.from(document.querySelectorAll("[data-run-action]"));
   dom.toastContainer = document.getElementById("toast-container");
   dom.telemetryContent = document.getElementById("telemetry-content");
+  dom.telemetryWatchInput = document.getElementById("telemetry-watch-input");
+  dom.telemetryWatchBtn = document.getElementById("telemetry-watch-btn");
   dom.writeBufferPath = document.getElementById("write-buffer-path");
   dom.writeBufferValue = document.getElementById("write-buffer-value");
   dom.writeBufferButton = document.getElementById("write-buffer-button");
@@ -75,6 +77,15 @@ function bindEvents() {
   dom.placeholderButtons.forEach(b => b.addEventListener("click", () => showToast("info", b.dataset.placeholder, "Mục này đang để placeholder.")));
   dom.themeToggle.addEventListener("click", () => { state.theme = state.theme==="dark"?"light":"dark"; applyTheme(state.theme); post("setTheme",{theme:state.theme}); });
   dom.connectButton.addEventListener("click", () => { post("connectToggle", { station: parseInt(dom.plcStation.value,10)||0 }); });
+
+  const goHomeBtn = document.getElementById("go-home-btn");
+  if(goHomeBtn) {
+    const stopHome = () => post("goHomeStop");
+    goHomeBtn.addEventListener("pointerdown", e => { if(e.button!==0) return; post("goHomeStart"); });
+    goHomeBtn.addEventListener("pointerup", stopHome);
+    goHomeBtn.addEventListener("pointerleave", stopHome);
+    goHomeBtn.addEventListener("pointercancel", stopHome);
+  }
   dom.emergencyStop.addEventListener("click", () => post("emergencyStop"));
   if(dom.clearEventsButton) dom.clearEventsButton.addEventListener("click", () => { state.control.events=[]; renderEvents(); post("clearLogs"); });
 
@@ -152,6 +163,13 @@ function bindEvents() {
     post("sendCadX");
   });
   if(dom.clearLogsButton) dom.clearLogsButton.addEventListener("click", () => post("clearLogs"));
+  if(dom.telemetryWatchBtn) {
+    dom.telemetryWatchBtn.addEventListener("click", () => {
+      const val = dom.telemetryWatchInput.value || "";
+      const regs = val.split(",").map(s => s.trim()).filter(s => s.length > 0);
+      post("setTelemetryWatchList", { registers: regs });
+    });
+  }
   dom.modalCancel.addEventListener("click", closePrompt);
   dom.modalConfirm.addEventListener("click", submitPrompt);
   dom.modal.addEventListener("click", e => { if(e.target===dom.modal) closePrompt(); });
@@ -194,18 +212,32 @@ function renderControl() {
   dom.connectionMeta.textContent = conn.meta || "";
   dom.sidebarStatus.textContent = conn.connected ? "Mitsu: OK" : "Mitsu: DC";
 
-  // Render 4 axes
+  // Render 4 axes dynamically
   const axes = state.control.axes || [];
-  for(let i=0; i<4; i++) {
-    const a = axes[i] || {};
-    const n = i+1;
-    setText(`axis${n}-md20`, a.md20 || "--");
-    setText(`axis${n}-md21`, a.md21 || "--");
-    setText(`axis${n}-md22`, a.md22 || "--");
-    setText(`axis${n}-md28`, a.md28 || "--");
-    setText(`axis${n}-md44`, a.md44 || "--");
-    const rpBar = document.getElementById(`axis${n}-rp-bar`);
-    if(rpBar) rpBar.classList.toggle("active", !!a.md44Active);
+  const accents = ['accent-axis-1','accent-axis-2','accent-axis-3','accent-axis-4'];
+  const fields = [
+    {key:'currentPos',   label:'CURRENT POSITION',          addrKey:'currentPosAddr',   big:true},
+    {key:'currentSpeed', label:'CURRENT SPEED',              addrKey:'currentSpeedAddr', big:true},
+    {key:'errorCode',    label:'ERROR CODE',                 addrKey:'errorCodeAddr'},
+    {key:'warningCode',  label:'WARNING CODE',               addrKey:'warningCodeAddr'},
+    {key:'axisStatus',   label:'AXIS STATUS',                addrKey:'axisStatusAddr'},
+    {key:'startNo',      label:'START NO.',                  addrKey:'startNoAddr'},
+    {key:'errorReset',   label:'ERROR RESET',                addrKey:'errorResetAddr'},
+    {key:'jogSpeed',     label:'JOG SPEED',                  addrKey:'jogSpeedAddr', big:true},
+    {key:'newSpeed',     label:'NEW SPEED VALUE',            addrKey:'newSpeedAddr', big:true}
+  ];
+  const grid = document.getElementById('axis-grid');
+  if(grid) {
+    grid.innerHTML = axes.map((a,i) => {
+      const n = a.index || (i+1);
+      const rows = fields.map(f => {
+        const val = a[f.key] || '--';
+        const addr = a[f.addrKey] || '';
+        const cls = f.big ? 'axis-field-value' : 'axis-field-value sm';
+        return `<div class="axis-field"><div class="axis-field-label">${esc(f.label)} <span class="axis-addr">${esc(addr)}</span></div><div class="${cls}">${esc(val)}</div></div>`;
+      }).join('');
+      return `<div class="axis-card"><div class="axis-header ${accents[i]||''}">AXIS ${n}</div><div class="axis-body">${rows}</div></div>`;
+    }).join('');
   }
   renderEvents();
   updateNavState();
@@ -342,10 +374,18 @@ if(!host) {
       view:"control", theme:"dark",
       connection:{ connected:false, station:0, banner:"PLC disconnected", meta:"MX Component logical station: 0", buttonText:"CONNECT PLC Q" },
       axes:[
-        {index:1,md20:"--",md21:"--",md22:"--",md28:"--",md44:"--",md44Active:false},
-        {index:2,md20:"--",md21:"--",md22:"--",md28:"--",md44:"--",md44Active:false},
-        {index:3,md20:"--",md21:"--",md22:"--",md28:"--",md44:"--",md44Active:false},
-        {index:4,md20:"--",md21:"--",md22:"--",md28:"--",md44:"--",md44Active:false}
+        {index:1,currentPos:"--",currentSpeed:"--",errorCode:"--",warningCode:"--",axisStatus:"--",startNo:"--",errorReset:"--",jogSpeed:"--",newSpeed:"--",
+         currentPosAddr:"U0\\G800",currentSpeedAddr:"U0\\G804",errorCodeAddr:"U0\\G806",warningCodeAddr:"U0\\G807",axisStatusAddr:"U0\\G814",
+         startNoAddr:"U0\\G1500",errorResetAddr:"U0\\G1502",jogSpeedAddr:"U0\\G1504",newSpeedAddr:"U0\\G1518"},
+        {index:2,currentPos:"--",currentSpeed:"--",errorCode:"--",warningCode:"--",axisStatus:"--",startNo:"--",errorReset:"--",jogSpeed:"--",newSpeed:"--",
+         currentPosAddr:"U0\\G900",currentSpeedAddr:"U0\\G904",errorCodeAddr:"U0\\G906",warningCodeAddr:"U0\\G907",axisStatusAddr:"U0\\G914",
+         startNoAddr:"U0\\G1600",errorResetAddr:"U0\\G1602",jogSpeedAddr:"U0\\G1604",newSpeedAddr:"U0\\G1618"},
+        {index:3,currentPos:"--",currentSpeed:"--",errorCode:"--",warningCode:"--",axisStatus:"--",startNo:"--",errorReset:"--",jogSpeed:"--",newSpeed:"--",
+         currentPosAddr:"U0\\G1000",currentSpeedAddr:"U0\\G1004",errorCodeAddr:"U0\\G1006",warningCodeAddr:"U0\\G1007",axisStatusAddr:"U0\\G1014",
+         startNoAddr:"U0\\G1700",errorResetAddr:"U0\\G1702",jogSpeedAddr:"U0\\G1704",newSpeedAddr:"U0\\G1718"},
+        {index:4,currentPos:"--",currentSpeed:"--",errorCode:"--",warningCode:"--",axisStatus:"--",startNo:"--",errorReset:"--",jogSpeed:"--",newSpeed:"--",
+         currentPosAddr:"U0\\G1100",currentSpeedAddr:"U0\\G1104",errorCodeAddr:"U0\\G1106",warningCodeAddr:"U0\\G1107",axisStatusAddr:"U0\\G1114",
+         startNoAddr:"U0\\G1800",errorResetAddr:"U0\\G1802",jogSpeedAddr:"U0\\G1804",newSpeedAddr:"U0\\G1818"}
       ],
       events:[
         {time:"08:51",kind:"security",tag:"Security",message:"Administrator logged in successfully."}
