@@ -382,8 +382,8 @@ namespace test1
 
         public void Dispose()
         {
-            if (isConnected) Disconnect();
-            if (plcDevice != null) Marshal.ReleaseComObject(plcDevice);
+            try { if (isConnected) Disconnect(); } catch { }
+            plcDevice = null;
         }
     }
 }

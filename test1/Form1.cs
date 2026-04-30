@@ -83,6 +83,7 @@ namespace test1
         private string integrityDetail = "STOP";
         private string integrityTone = "idle";
         private string selectedCadPointKey;
+        private float currentJogSpeedD406 = 1000f;
 
         public Form1()
         {
@@ -662,6 +663,18 @@ namespace test1
                         }
                     }
 
+                    // Read global Jog Speed (D406 - Float)
+                    try
+                    {
+                        if (!isClosing)
+                        {
+                            int[] d406Raw = comm.ReadDeviceRange("D406", 2);
+                            byte[] bytes = BitConverter.GetBytes((d406Raw[1] << 16) | (d406Raw[0] & 0xFFFF));
+                            currentJogSpeedD406 = BitConverter.ToSingle(bytes, 0);
+                        }
+                    }
+                    catch { }
+
                     // Read monitor rows on background thread too
                     foreach (MonitorRow row in monitorRows)
                     {
@@ -801,6 +814,13 @@ namespace test1
             return mm.ToString("0.0000", CultureInfo.InvariantCulture);
         }
 
+        private static string FormatSpeedMm(int rawValue)
+        {
+            // Thường là 10^-2 mm/min cho Mitsubishi monitor
+            double mmMin = rawValue / 100.0;
+            return mmMin.ToString("0.00", CultureInfo.InvariantCulture);
+        }
+
         private Task PushControlStateAsync()
         {
             bool connected = plcComm != null && plcComm.IsConnected;
@@ -816,7 +836,7 @@ namespace test1
                     index = i + 1,
                     currentPos     = connected ? FormatPositionMm(axCurrentPos[i]) : dash,
                     currentPosAddr = $"U0\\G{mb}",
-                    currentSpeed   = connected ? axCurrentSpeed[i].ToString(CultureInfo.InvariantCulture) : dash,
+                    currentSpeed   = connected ? FormatSpeedMm(axCurrentSpeed[i]) : dash,
                     currentSpeedAddr = $"U0\\G{mb + OffCurrentSpeed}",
                     errorCode      = connected ? axErrorCode[i].ToString(CultureInfo.InvariantCulture) : dash,
                     errorCodeAddr  = $"U0\\G{mb + OffErrorCode}",
@@ -828,7 +848,7 @@ namespace test1
                     startNoAddr    = $"U0\\G{cb + OffStartNo}",
                     errorReset     = connected ? axErrorReset[i].ToString(CultureInfo.InvariantCulture) : dash,
                     errorResetAddr = $"U0\\G{cb + OffErrorReset}",
-                    jogSpeed       = connected ? axJogSpeed[i].ToString(CultureInfo.InvariantCulture) : dash,
+                    jogSpeed       = connected ? FormatSpeedMm(axJogSpeed[i]) : dash,
                     jogSpeedAddr   = $"U0\\G{cb + OffJogSpeed}",
                     newSpeed       = connected ? axNewSpeed[i].ToString(CultureInfo.InvariantCulture) : dash,
                     newSpeedAddr   = $"U0\\G{cb + OffNewSpeed}"
@@ -848,6 +868,7 @@ namespace test1
                     buttonText = connected ? "DISCONNECT PLC Q" : "CONNECT PLC Q"
                 },
                 axes = axesData,
+                jogSpeedD406 = currentJogSpeedD406,
                 events = new object[0]
             };
 

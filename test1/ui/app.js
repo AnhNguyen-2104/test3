@@ -229,17 +229,23 @@ function renderControl() {
   dom.connectionMeta.textContent = conn.meta || "";
   dom.sidebarStatus.textContent = conn.connected ? "Mitsu: OK" : "Mitsu: DC";
 
+  const jogSpeedD406 = state.control.jogSpeedD406;
+  if (jogSpeedD406 != null) {
+    const jogInput = document.getElementById("jog-speed-input");
+    syncInputValue(jogInput, String(jogSpeedD406));
+  }
+
   // Render 4 axes dynamically
   const axes = state.control.axes || [];
   const accents = ['accent-axis-1', 'accent-axis-2', 'accent-axis-3', 'accent-axis-4'];
   const fields = [
-    { key: 'currentPos', label: 'CURRENT POSITION', addrKey: 'currentPosAddr', big: true },
-    { key: 'currentSpeed', label: 'CURRENT SPEED', addrKey: 'currentSpeedAddr', big: true },
+    { key: 'currentPos', label: 'CURRENT POSITION (mm)', addrKey: 'currentPosAddr', big: true },
+    { key: 'currentSpeed', label: 'CURRENT SPEED (mm/min)', addrKey: 'currentSpeedAddr', big: true },
     { key: 'errorCode', label: 'ERROR CODE', addrKey: 'errorCodeAddr' },
     { key: 'warningCode', label: 'WARNING CODE', addrKey: 'warningCodeAddr' },
     { key: 'axisStatus', label: 'AXIS STATUS', addrKey: 'axisStatusAddr' },
     { key: 'startNo', label: 'START NO.', addrKey: 'startNoAddr' },
-    { key: 'jogSpeed', label: 'JOG SPEED', addrKey: 'jogSpeedAddr', big: true }
+    { key: 'jogSpeed', label: 'JOG SPEED (mm/min)', addrKey: 'jogSpeedAddr', big: true }
   ];
   const grid = document.getElementById('axis-grid');
   if (grid) {
