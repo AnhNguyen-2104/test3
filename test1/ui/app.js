@@ -255,6 +255,12 @@ function renderControl() {
   dom.plcStatusText.textContent = conn.connected ? "OK" : "DC";
   dom.connectionMeta.textContent = conn.meta || "";
   dom.sidebarStatus.textContent = conn.connected ? "Mitsu: OK" : "Mitsu: DC";
+  
+  const jogSpeedD406 = state.control.jogSpeedD406;
+  if (jogSpeedD406 != null) {
+    const jogInput = document.getElementById("jog-speed-input");
+    if (jogInput) syncInputValue(jogInput, String(jogSpeedD406));
+  }
 
 
 
