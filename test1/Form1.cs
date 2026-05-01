@@ -665,19 +665,24 @@ namespace test1
                         try
                         {
                             if (isClosing) return;
-                            // Monitor area: G800..G814 (15 words)
+                            // Read Current Position and Speed from D registers as requested
+                            // Axis 1: D0, D4 | Axis 2: D10, D14 | Axis 3: D20, D24 | Axis 4: D30, D34
+                            int dBase = i * 10;
+                            int[] posData = comm.ReadDeviceRange($"D{dBase}", 2);
+                            axCurrentPos[i] = (posData[1] << 16) | (posData[0] & 0xFFFF);
+
+                            int[] speedData = comm.ReadDeviceRange($"D{dBase + 4}", 2);
+                            axCurrentSpeed[i] = (speedData[1] << 16) | (speedData[0] & 0xFFFF);
+
+                            // Other parameters still from Buffer Memory
                             int[] mon = comm.ReadBuffer(0, MonitorBaseG[i], 15);
-                            axCurrentPos[i]   = (mon[OffCurrentPos + 1] << 16) | (mon[OffCurrentPos] & 0xFFFF);
-                            axCurrentSpeed[i] = (mon[OffCurrentSpeed + 1] << 16) | (mon[OffCurrentSpeed] & 0xFFFF);
                             axErrorCode[i]    = mon[OffErrorCode];
                             axWarningCode[i]  = mon[OffWarningCode];
                             axAxisStatus[i]   = mon[OffAxisStatus];
 
-                            // Control area: G1500..G1519 (20 words)
                             int[] ctl = comm.ReadBuffer(0, ControlBaseG[i], 20);
                             axStartNo[i]     = ctl[OffStartNo];
                             axErrorReset[i]  = ctl[OffErrorReset];
-                            axJogSpeed[i]    = (ctl[OffJogSpeed + 1] << 16) | (ctl[OffJogSpeed] & 0xFFFF);
                             axNewSpeed[i]    = (ctl[OffNewSpeed + 1] << 16) | (ctl[OffNewSpeed] & 0xFFFF);
                         }
                         catch

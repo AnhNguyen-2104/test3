@@ -447,23 +447,23 @@ if (!host) {
         axes: [
           {
             index: 1, currentPos: "--", currentSpeed: "--", errorCode: "--", warningCode: "--", axisStatus: "--", startNo: "--", errorReset: "--", jogSpeed: "--", newSpeed: "--",
-            currentPosAddr: "U0\\G800", currentSpeedAddr: "U0\\G804", errorCodeAddr: "U0\\G806", warningCodeAddr: "U0\\G807", axisStatusAddr: "U0\\G814",
-            startNoAddr: "U0\\G1500", errorResetAddr: "U0\\G1502", jogSpeedAddr: "U0\\G1504", newSpeedAddr: "U0\\G1518"
+            currentPosAddr: "D0", currentSpeedAddr: "D4", errorCodeAddr: "U0\\G806", warningCodeAddr: "U0\\G807", axisStatusAddr: "U0\\G814",
+            startNoAddr: "U0\\G1500", errorResetAddr: "U0\\G1502", jogSpeedAddr: "D406", newSpeedAddr: "U0\\G1518"
           },
           {
             index: 2, currentPos: "--", currentSpeed: "--", errorCode: "--", warningCode: "--", axisStatus: "--", startNo: "--", errorReset: "--", jogSpeed: "--", newSpeed: "--",
-            currentPosAddr: "U0\\G900", currentSpeedAddr: "U0\\G904", errorCodeAddr: "U0\\G906", warningCodeAddr: "U0\\G907", axisStatusAddr: "U0\\G914",
-            startNoAddr: "U0\\G1600", errorResetAddr: "U0\\G1602", jogSpeedAddr: "U0\\G1604", newSpeedAddr: "U0\\G1618"
+            currentPosAddr: "D10", currentSpeedAddr: "D14", errorCodeAddr: "U0\\G906", warningCodeAddr: "U0\\G907", axisStatusAddr: "U0\\G914",
+            startNoAddr: "U0\\G1600", errorResetAddr: "U0\\G1602", jogSpeedAddr: "D406", newSpeedAddr: "U0\\G1618"
           },
           {
             index: 3, currentPos: "--", currentSpeed: "--", errorCode: "--", warningCode: "--", axisStatus: "--", startNo: "--", errorReset: "--", jogSpeed: "--", newSpeed: "--",
-            currentPosAddr: "U0\\G1000", currentSpeedAddr: "U0\\G1004", errorCodeAddr: "U0\\G1006", warningCodeAddr: "U0\\G1007", axisStatusAddr: "U0\\G1014",
-            startNoAddr: "U0\\G1700", errorResetAddr: "U0\\G1702", jogSpeedAddr: "U0\\G1704", newSpeedAddr: "U0\\G1718"
+            currentPosAddr: "D20", currentSpeedAddr: "D24", errorCodeAddr: "U0\\G1006", warningCodeAddr: "U0\\G1007", axisStatusAddr: "U0\\G1014",
+            startNoAddr: "U0\\G1700", errorResetAddr: "U0\\G1702", jogSpeedAddr: "D406", newSpeedAddr: "U0\\G1718"
           },
           {
             index: 4, currentPos: "--", currentSpeed: "--", errorCode: "--", warningCode: "--", axisStatus: "--", startNo: "--", errorReset: "--", jogSpeed: "--", newSpeed: "--",
-            currentPosAddr: "U0\\G1100", currentSpeedAddr: "U0\\G1104", errorCodeAddr: "U0\\G1106", warningCodeAddr: "U0\\G1107", axisStatusAddr: "U0\\G1114",
-            startNoAddr: "U0\\G1800", errorResetAddr: "U0\\G1802", jogSpeedAddr: "U0\\G1804", newSpeedAddr: "U0\\G1818"
+            currentPosAddr: "D30", currentSpeedAddr: "D34", errorCodeAddr: "U0\\G1106", warningCodeAddr: "U0\\G1107", axisStatusAddr: "U0\\G1114",
+            startNoAddr: "U0\\G1800", errorResetAddr: "U0\\G1802", jogSpeedAddr: "D406", newSpeedAddr: "U0\\G1818"
           }
         ],
         events: [
