@@ -284,6 +284,42 @@ namespace test1
         }
 
         /// <summary>
+        /// Sửa đổi 2 bit thấp nhất (Da.1) trong thanh ghi Positioning Identifier (16-bit)
+        /// mà không làm hỏng Da.2 đến Da.5. (Ví dụ: U0\G2000)
+        /// </summary>
+        public int WriteOperationPatternToDevicePath(string devicePath, short da1Value, out string usedMethod)
+        {
+            usedMethod = "";
+            if (!isConnected) throw new InvalidOperationException("Chưa kết nối PLC");
+            
+            if (TryParseUDevicePath(devicePath, out int startIO, out int address))
+            {
+                usedMethod = "ReadBuffer -> Modify -> WriteBuffer";
+                try
+                {
+                    // Bước 1: Đọc giá trị hiện tại
+                    short[] sData = new short[1];
+                    int resRead = plcDevice.ReadBuffer(startIO, address, 1, out sData[0]);
+                    if (resRead != 0) return resRead;
+
+                    // Bước 2: Xóa 2 bit b0, b1 về 0 (AND với 0xFFFC ~ -4)
+                    sData[0] = (short)(sData[0] & ~0x0003);
+
+                    // Bước 3: Ghi giá trị mới (00, 01, 11)
+                    sData[0] = (short)(sData[0] | (da1Value & 0x0003));
+
+                    // Bước 4: Ghi xuống PLC
+                    return plcDevice.WriteBuffer(startIO, address, 1, ref sData[0]);
+                }
+                catch (Exception ex)
+                {
+                    throw new Exception($"Lỗi WriteOperationPatternToDevicePath: {GetInnermostMessage(ex)}");
+                }
+            }
+            throw new ArgumentException("Path must be a buffer address (U\\G).");
+        }
+
+        /// <summary>
         /// Ghi số 32-bit theo thứ tự Low Word -> High Word.
         /// Ví dụ: G2006 (L) và G2007 (H).
         /// </summary>

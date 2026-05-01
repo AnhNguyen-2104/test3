@@ -208,6 +208,14 @@ namespace test1
                         await HandleResetErrorWriteAsync(false);
                         break;
 
+                    case "startActionStart":
+                        await HandleStartWriteAsync(true);
+                        break;
+
+                    case "startActionStop":
+                        await HandleStartWriteAsync(false);
+                        break;
+
                     case "setJogSpeed":
                         await HandleSetJogSpeedAsync(GetDouble(payload, "value", 0));
                         break;
@@ -461,6 +469,33 @@ namespace test1
                     UpdateIntegrityFault(ex.Message);
                     AddLogEntry("M300", (active ? 1 : 0).ToString(CultureInfo.InvariantCulture), "Write", "Error", ex.Message);
                     await NotifyAsync("error", "Reset Error", ex.Message);
+                    await PushControlStateAsync();
+                }
+            }
+        }
+
+        private async Task HandleStartWriteAsync(bool active)
+        {
+            try
+            {
+                EnsureConnected();
+                int v = active ? 1 : 0;
+                plcComm.WriteDeviceValue("M2000", v);
+                UpdateIntegrityState(true);
+                AddLogEntry("M2000", v.ToString(CultureInfo.InvariantCulture), "Write", "OK", "Start");
+                
+                if (active)
+                {
+                    await NotifyAsync("success", "System", "Activated START command (M2000)");
+                }
+            }
+            catch (Exception ex)
+            {
+                if (active)
+                {
+                    UpdateIntegrityFault(ex.Message);
+                    AddLogEntry("M2000", (active ? 1 : 0).ToString(CultureInfo.InvariantCulture), "Write", "Error", ex.Message);
+                    await NotifyAsync("error", "Start", ex.Message);
                     await PushControlStateAsync();
                 }
             }
@@ -1145,28 +1180,21 @@ namespace test1
             }
         }
 
-        private int MapMotionTypeToCode(string motionType)
+        private short MapMotionTypeToOperationPattern(string motionType)
         {
             if (string.IsNullOrWhiteSpace(motionType)) return 0;
             string s = motionType.Trim().ToLowerInvariant();
             
-            bool isEnd = s.Contains("end");
-            bool isContinuousPositioning = s.Contains("positioning");
+            bool isEnd = s.Contains("end") || s.Contains("hoàn thành");
+            bool isContinuousPositioning = s.Contains("positioning") || s.Contains("liên tục");
 
-            // Hex mapping rule (placeholder for Continuous Positioning = 0x300A/0x300F)
-            // Lệnh End: 0x10...
-            // Lệnh Continuous Positioning: 0x30... (hoặc mã khác theo thực tế PLC)
-            // Lệnh Continuous Path: 0xD0...
+            // 0: Positioning complete (End)
+            // 1: Continuous positioning
+            // 3: Continuous path
             
-            int prefix = isEnd ? 0x1000 : (isContinuousPositioning ? 0x3000 : 0xD000);
-
-            if (s.Contains("line") || s.Contains("đường") || s.Contains("duong")) return prefix | 0x000A;
-            if (s.Contains("arc") && s.Contains("ccw")) return prefix | 0x0010;
-            if (s.Contains("arc") && s.Contains("cw")) return prefix | 0x000F;
-            if (s.Contains("arc") || s.Contains("cung")) return prefix | 0x000F;
-            if (s.Contains("circle") || s.Contains("tâm") || s.Contains("tam") || s.Contains("tròn") || s.Contains("tron")) return prefix | 0x000F;
-            
-            return 0;
+            if (isEnd) return 0;
+            if (isContinuousPositioning) return 1;
+            return 3; // Default to Continuous path
         }
 
         private async Task HandleSendCadXAsync()
@@ -1238,17 +1266,17 @@ namespace test1
                     if (int.TryParse(row.Speed, NumberStyles.Any, CultureInfo.InvariantCulture, out parsed)) speedVal = parsed;
                 }
 
-                int moveCode = MapMotionTypeToCode(row.MotionType);
+                short moveCode = MapMotionTypeToOperationPattern(row.MotionType);
 
                 string deviceBase = $"U0\\G{baseG + (n - 1) * stride}";
 
                 try
                 {
-                    // write move code
+                    // write move code (Da.1 only, preserves Da.2-5)
                     string deviceMove = $"U0\\G{baseG + (n - 1) * stride + offsetMoveCode}";
                     string usedMove;
-                    int rMove = plcComm.WriteInt32ToDevicePath(deviceMove, moveCode, out usedMove);
-                    AddLogEntry(deviceMove, "0x" + moveCode.ToString("X4"), "Write", rMove == 0 ? "OK" : $"Error({rMove})", "MoveCode:" + usedMove);
+                    int rMove = plcComm.WriteOperationPatternToDevicePath(deviceMove, moveCode, out usedMove);
+                    AddLogEntry(deviceMove, "0x" + moveCode.ToString("X4"), "Write", rMove == 0 ? "OK" : $"Error({rMove})", "Da.1:" + usedMove);
 
                     // write M code
                     string deviceM = $"U0\\G{baseG + (n - 1) * stride + offsetMCode}";

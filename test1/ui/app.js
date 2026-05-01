@@ -95,6 +95,15 @@ function bindEvents() {
     resetErrorBtn.addEventListener("pointerleave", stopReset);
     resetErrorBtn.addEventListener("pointercancel", stopReset);
   }
+
+  const startBtn = document.getElementById("start-btn");
+  if (startBtn) {
+    const stopStart = () => post("startActionStop");
+    startBtn.addEventListener("pointerdown", e => { if (e.button !== 0) return; post("startActionStart"); });
+    startBtn.addEventListener("pointerup", stopStart);
+    startBtn.addEventListener("pointerleave", stopStart);
+    startBtn.addEventListener("pointercancel", stopStart);
+  }
   dom.emergencyStop.addEventListener("click", () => post("emergencyStop"));
   if (dom.clearEventsButton) dom.clearEventsButton.addEventListener("click", () => { state.control.events = []; renderEvents(); post("clearLogs"); });
 
