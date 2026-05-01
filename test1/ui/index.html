@@ -64,13 +64,7 @@
         </div>
         <div class="jog-addr-info">X+:M3000 · X-:M3001 · Y+:M3002 · Y-:M3003 ·
           Z+:M3004 · Z-:M3005</div>
-        <div class="jog-distance-container" style="margin-top: 12px; padding: 0 12px;">
-          <label class="field-label" style="font-size: 10px; margin-bottom: 4px; color: var(--muted);">JOG SPEED (D406 - cm/min)</label>
-          <div style="display: flex; gap: 4px;">
-            <input id="jog-speed-input" class="text-input compact" type="number" value="1000" step="0.001" style="flex: 1;">
-            <button id="set-jog-speed-btn" class="primary-button compact" style="min-width: 60px;">SET</button>
-          </div>
-        </div>
+
       </div>
 
       <div class="sidebar-footer">
@@ -102,9 +96,14 @@
               <label class="field-label" for="plc-station">LOGICAL STATION NO.</label>
               <input id="plc-station" class="text-input" type="number" value="0">
               <button id="connect-button" class="primary-button full-width connect-btn-q">CONNECT PLC Q</button>
-              <button id="go-home-btn" class="primary-button full-width" style="margin-top: 8px; background-color: var(--warning-color, #eab308); color: black; border: none;">GO HOME (M502)</button>
-              <button id="reset-error-btn" class="primary-button full-width" style="margin-top: 8px; background-color: #ef4444; color: white; border: none;">RESET ERROR (M300)</button>
-              <button id="start-btn" class="primary-button full-width" style="margin-top: 8px; background-color: #22c55e; color: white; border: none;">START (M2000)</button>
+              <button id="go-home-btn" class="primary-button full-width"
+                style="margin-top: 8px; background-color: var(--warning-color, #eab308); color: black; border: none;">GO
+                HOME (M502)</button>
+              <button id="reset-error-btn" class="primary-button full-width"
+                style="margin-top: 8px; background-color: #ef4444; color: white; border: none;">RESET ERROR
+                (M300)</button>
+              <button id="start-btn" class="primary-button full-width"
+                style="margin-top: 8px; background-color: #22c55e; color: white; border: none;">START (M2000)</button>
             </div>
 
             <div id="connection-meta" class="muted-text" style="margin-top:12px;">MX Component logical station: 0</div>
@@ -115,7 +114,8 @@
             <div class="panel-header">
               <div>
                 <div class="panel-title">Axis Monitor</div>
-                <div class="panel-subtitle">Position · Speed · Error Code · Warning · Status · Start No. · JOG Speed · New Speed</div>
+                <div class="panel-subtitle">Position · Speed · Error Code · Warning · Status · Start No. · JOG Speed ·
+                  New Speed</div>
               </div>
             </div>
             <div class="axis-grid" id="axis-grid">
@@ -180,10 +180,12 @@
               <div class="panel-subtitle">Live D registers and Un\\Gx buffers</div>
             </div>
           </div>
-          
+
           <div class="telemetry-actions" style="margin-bottom: 12px; display:flex; gap:8px; align-items:center;">
-            <input id="telemetry-add-path" class="text-input compact" type="text" placeholder="Add address: D100, M10, U0\G800..." style="flex: 1;" />
-            <input id="telemetry-add-len" class="text-input compact" type="number" placeholder="Length (if U\G)" value="1" style="width: 130px;" />
+            <input id="telemetry-add-path" class="text-input compact" type="text"
+              placeholder="Add address: D100, M10, U0\G800..." style="flex: 1;" />
+            <input id="telemetry-add-len" class="text-input compact" type="number" placeholder="Length (if U\G)"
+              value="1" style="width: 130px;" />
             <button id="telemetry-add-btn" class="primary-button compact">Add to List</button>
           </div>
 

@@ -256,11 +256,7 @@ function renderControl() {
   dom.connectionMeta.textContent = conn.meta || "";
   dom.sidebarStatus.textContent = conn.connected ? "Mitsu: OK" : "Mitsu: DC";
 
-  const jogSpeedD406 = state.control.jogSpeedD406;
-  if (jogSpeedD406 != null) {
-    const jogInput = document.getElementById("jog-speed-input");
-    syncInputValue(jogInput, String(jogSpeedD406));
-  }
+
 
   // Render 4 axes dynamically
   const axes = state.control.axes || [];
@@ -272,7 +268,7 @@ function renderControl() {
     { key: 'warningCode', label: 'WARNING CODE', addrKey: 'warningCodeAddr' },
     { key: 'axisStatus', label: 'AXIS STATUS', addrKey: 'axisStatusAddr' },
     { key: 'startNo', label: 'START NO.', addrKey: 'startNoAddr' },
-    { key: 'jogSpeed', label: 'JOG SPEED (mm/min)', addrKey: 'jogSpeedAddr', big: true }
+
   ];
   const grid = document.getElementById('axis-grid');
   if (grid) {
@@ -368,9 +364,9 @@ function renderTelemetry() {
   if (dom.writeBufferButton) dom.writeBufferButton.disabled = !connected;
   const sendBtn = document.getElementById("send-cad-x-button"); if (sendBtn) sendBtn.disabled = !connected;
   if (!dom.telemetryContent) return;
-  
+
   const rows = [`<div class="telemetry-header">Telemetry (${connected ? "connected" : "disconnected"})</div>`];
-  
+
   if (dValues.length) {
     rows.push('<div class="telemetry-section"><div class="telemetry-title">D registers</div><table class="telemetry-table data-table compact"><thead><tr><th>Register</th><th>Value</th><th>Status</th><th style="width: 40px"></th></tr></thead><tbody>');
     dValues.forEach(i => {
@@ -383,10 +379,10 @@ function renderTelemetry() {
     });
     rows.push("</tbody></table></div>");
   }
-  
+
   if (buffers.length) {
     rows.push('<div class="telemetry-section"><div class="telemetry-title">Buffers (Un\\Gx)</div><table class="telemetry-table data-table compact"><thead><tr><th>Buffer Path</th><th>Values</th><th>Status</th><th style="width: 40px"></th></tr></thead><tbody>');
-    buffers.forEach(b => { 
+    buffers.forEach(b => {
       const path = esc(b.path || "");
       const vArr = b.values || [];
       const v = vArr.map(val => esc(String(val))).join(", ");
@@ -398,7 +394,7 @@ function renderTelemetry() {
     });
     rows.push("</tbody></table></div>");
   }
-  
+
   dom.telemetryContent.innerHTML = rows.join("");
 }
 
