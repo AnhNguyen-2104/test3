@@ -892,9 +892,9 @@ namespace test1
                 {
                     index = i + 1,
                     currentPos     = connected ? FormatPositionMm(axCurrentPos[i]) : dash,
-                    currentPosAddr = $"U0\\G{mb}",
+                    currentPosAddr = $"D{i * 10}",
                     currentSpeed   = connected ? FormatSpeedMm(axCurrentSpeed[i]) : dash,
-                    currentSpeedAddr = $"U0\\G{mb + OffCurrentSpeed}",
+                    currentSpeedAddr = $"D{i * 10 + 4}",
                     errorCode      = connected ? axErrorCode[i].ToString(CultureInfo.InvariantCulture) : dash,
                     errorCodeAddr  = $"U0\\G{mb + OffErrorCode}",
                     warningCode    = connected ? axWarningCode[i].ToString(CultureInfo.InvariantCulture) : dash,
@@ -906,7 +906,7 @@ namespace test1
                     errorReset     = connected ? axErrorReset[i].ToString(CultureInfo.InvariantCulture) : dash,
                     errorResetAddr = $"U0\\G{cb + OffErrorReset}",
                     jogSpeed       = connected ? FormatSpeedMm(axJogSpeed[i]) : dash,
-                    jogSpeedAddr   = $"U0\\G{cb + OffJogSpeed}",
+                    jogSpeedAddr   = "D406",
                     newSpeed       = connected ? axNewSpeed[i].ToString(CultureInfo.InvariantCulture) : dash,
                     newSpeedAddr   = $"U0\\G{cb + OffNewSpeed}"
                 };
