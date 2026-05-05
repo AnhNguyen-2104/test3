@@ -307,7 +307,7 @@ namespace test1
             {
                 DisconnectPlc(false);
 
-                plcComm = new PLCCommunication(plcIpAddress, plcPort);
+                plcComm = new PLCCommunication(plcIpAddress, plcPort, logicalStation);
                 // Set logical station number from UI
                 // plcDevice.ActLogicalStationNumber is set in PLCCommunication constructor
                 if (!plcComm.Connect())
@@ -550,6 +550,14 @@ namespace test1
             {
                 dialog.Filter = "DXF files (*.dxf)|*.dxf|All files (*.*)|*.*";
                 dialog.Title = "Open DXF file";
+                dialog.CheckFileExists = true;
+                dialog.Multiselect = false;
+                dialog.RestoreDirectory = true;
+                dialog.FileName = string.Empty;
+                if (!string.IsNullOrWhiteSpace(activeCadDocument?.DirectoryPath) && Directory.Exists(activeCadDocument.DirectoryPath))
+                {
+                    dialog.InitialDirectory = activeCadDocument.DirectoryPath;
+                }
 
                 if (dialog.ShowDialog(this) != DialogResult.OK)
                 {
@@ -558,7 +566,10 @@ namespace test1
 
                 try
                 {
-                    LoadCadDocument(dialog.FileName);
+                    string selectedPath = Path.GetFullPath(dialog.FileName);
+                    AddLogEntry("DXF", selectedPath, "Read", "Selected", "OpenFileDialog");
+
+                    LoadCadDocument(selectedPath);
                     if (activeCadDocument != null && activeCadDocument.Primitives != null)
                     {
                         var paths = GetConnectedPathsFromCad(activeCadDocument.Primitives);
@@ -570,7 +581,8 @@ namespace test1
                     }
                     currentView = "dxf";
                     await PushDxfStateAsync();
-                    await NotifyAsync("success", "DXF", "Loaded DXF file.");
+                    AddLogEntry("DXF", activeCadDocument?.FilePath ?? selectedPath, "Read", "OK", $"Loaded file: {activeCadDocument?.FileName ?? Path.GetFileName(selectedPath)}");
+                    await NotifyAsync("success", "DXF", $"Loaded: {activeCadDocument?.FileName ?? Path.GetFileName(selectedPath)}");
                 }
                 catch (Exception ex)
                 {
@@ -940,7 +952,7 @@ namespace test1
             {
                 view = currentView,
                 theme = currentTheme,
-                filePath = activeCadDocument?.DirectoryPath ?? string.Empty,
+                filePath = activeCadDocument?.FilePath ?? string.Empty,
                 fileName = activeCadDocument?.FileName ?? string.Empty,
                 bounds = activeCadDocument == null
                     ? new
@@ -1256,8 +1268,8 @@ namespace test1
             const int offsetMCode = 1;    // U0\G(2000 + (n-1)*10 + 1)
             const int offsetDwell = 2;    // U0\G(2000 + (n-1)*10 + 2)
             const int offsetSpeed = 3;    // U0\G(2000 + (n-1)*10 + 3) -> Low word at G2003, High at G2004
-            const int offsetPosX = 6;     // U0\G(2000 + (n-1)*10 + 6)  <-- Position X
-            const int offsetCenterX = 8;  // U0\G(2000 + (n-1)*10 + 8)  <-- Center X
+            const int offsetPosX = 5;     // U0\G(2000 + (n-1)*10 + 5) -> Low word at G2005, High at G2006
+            const int offsetCenterX = 7;  // U0\G(2000 + (n-1)*10 + 7) -> Low word at G2007, High at G2008
 
             int n = 1;
             foreach (var row in rowsToSend)

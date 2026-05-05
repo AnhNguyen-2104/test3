@@ -13,12 +13,14 @@ namespace test1
 
         public string IPAddress { get; set; }
         public int Port { get; set; } = 2000;
+        public int LogicalStationNumber { get; set; } = 0;
         public bool IsConnected => isConnected;
 
-        public PLCCommunication(string ipAddress, int port = 2000)
+        public PLCCommunication(string ipAddress, int port = 2000, int logicalStationNumber = 0)
         {
             IPAddress = ipAddress;
             Port = port;
+            LogicalStationNumber = logicalStationNumber;
             try
             {
                 Type actUtlType = Type.GetTypeFromProgID("ActUtlType.ActUtlType");
@@ -36,7 +38,7 @@ namespace test1
             try
             {
                 if (isConnected) return true;
-                plcDevice.ActLogicalStationNumber = 0;
+                plcDevice.ActLogicalStationNumber = LogicalStationNumber;
                 int result = plcDevice.Open();
                 if (result == 0)
                 {

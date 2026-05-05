@@ -19,7 +19,12 @@ namespace test1
                 throw new ArgumentException("DXF path is empty.", nameof(filePath));
             }
 
-            DxfDocument document = DxfDocument.Load(filePath);
+            string fullPath = Path.GetFullPath(filePath);
+            DxfDocument document;
+            using (FileStream stream = new FileStream(fullPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+            {
+                document = DxfDocument.Load(stream);
+            }
             CadExtractionContext context = new CadExtractionContext();
 
             foreach (EntityObject entity in document.Entities.All)
@@ -29,9 +34,9 @@ namespace test1
 
             return new CadLoadResult
             {
-                FilePath = filePath,
-                DirectoryPath = Path.GetDirectoryName(filePath) ?? string.Empty,
-                FileName = Path.GetFileName(filePath),
+                FilePath = fullPath,
+                DirectoryPath = Path.GetDirectoryName(fullPath) ?? string.Empty,
+                FileName = Path.GetFileName(fullPath),
                 Bounds = CadBounds.FromRectangle(context.GetBounds()),
                 Primitives = context.Primitives,
                 Points = context.BuildPointRows()
