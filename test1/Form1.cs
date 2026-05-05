@@ -1255,7 +1255,7 @@ namespace test1
             const int offsetMoveCode = 0; // U0\G(2000 + (n-1)*10 + 0)
             const int offsetMCode = 1;    // U0\G(2000 + (n-1)*10 + 1)
             const int offsetDwell = 2;    // U0\G(2000 + (n-1)*10 + 2)
-            const int offsetSpeed = 4;    // U0\G(2000 + (n-1)*10 + 4)
+            const int offsetSpeed = 3;    // U0\G(2000 + (n-1)*10 + 3) -> Low word at G2003, High at G2004
             const int offsetPosX = 6;     // U0\G(2000 + (n-1)*10 + 6)  <-- Position X
             const int offsetCenterX = 8;  // U0\G(2000 + (n-1)*10 + 8)  <-- Center X
 
