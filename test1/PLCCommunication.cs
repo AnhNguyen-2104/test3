@@ -450,6 +450,8 @@ namespace test1
             return plcDevice.SetDevice2(highWordDevice, highWord);
         }
 
+
+
         private static bool TryGetNextWordDevice(string devicePath, out string nextWordDevice)
         {
             nextWordDevice = null;
