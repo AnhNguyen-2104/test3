@@ -1199,10 +1199,9 @@ namespace test1
             }
         }
 
-        private short MapMotionTypeToPositioningIdentifier(string motionType)
+        private short BuildPositioningIdentifierWord(string motionType, int interpolatedAxis = 1, int accelTimeNo = 0, int decelTimeNo = 0)
         {
-            if (string.IsNullOrWhiteSpace(motionType)) return 10;
-            string s = motionType.Trim().ToLowerInvariant();
+            string s = (motionType ?? string.Empty).Trim().ToLowerInvariant();
 
             bool isEnd = s.Contains("end") || s.Contains("hoàn thành");
             bool isContinuousPath = s.Contains("continuous path");
@@ -1215,31 +1214,42 @@ namespace test1
                 if (s.Contains("điểm kế tiếp")) isContinuousPositioning = true;
             }
 
-            // Positioning identifier in decimal values (16-bit word):
-            // Linear: 10 / 11 / 12
-            // Arc CW: 15 / 16 / 17
-            // Arc CCW: 16 / 17 / 18
-            short baseCode = 10; // linear default
+            int da2ControlSystem = 0x0A; // ABS Linear 2
             if (s.Contains("arc cw"))
             {
-                baseCode = 15;
+                da2ControlSystem = 0x0F;
             }
             else if (s.Contains("arc ccw"))
             {
-                baseCode = 16;
+                da2ControlSystem = 0x10;
             }
             else if (s.Contains("circle"))
             {
-                // Circle is treated as CW by default unless explicitly marked CCW.
-                baseCode = s.Contains("ccw") ? (short)16 : (short)15;
+                da2ControlSystem = s.Contains("ccw") ? 0x10 : 0x0F;
             }
 
-            if (isEnd) return baseCode;
-            if (isContinuousPositioning) return (short)(baseCode + 1);
-            if (isContinuousPath) return (short)(baseCode + 2);
+            int da1OperationPattern = 0x03; // Continuous path
+            if (isEnd)
+            {
+                da1OperationPattern = 0x00;
+            }
+            else if (isContinuousPositioning)
+            {
+                da1OperationPattern = 0x01;
+            }
+            else if (isContinuousPath)
+            {
+                da1OperationPattern = 0x03;
+            }
 
-            // Safe default: continuous path for smoother chain execution.
-            return (short)(baseCode + 2);
+            int wordValue =
+                ((da2ControlSystem & 0xFF) << 8) |
+                ((interpolatedAxis & 0x03) << 6) |
+                ((decelTimeNo & 0x03) << 4) |
+                ((accelTimeNo & 0x03) << 2) |
+                (da1OperationPattern & 0x03);
+
+            return unchecked((short)wordValue);
         }
 
         private async Task HandleSendCadXAsync()
@@ -1267,9 +1277,9 @@ namespace test1
             const int offsetMoveCode = 0; // U0\G(2000 + (n-1)*10 + 0)
             const int offsetMCode = 1;    // U0\G(2000 + (n-1)*10 + 1)
             const int offsetDwell = 2;    // U0\G(2000 + (n-1)*10 + 2)
-            const int offsetSpeed = 3;    // U0\G(2000 + (n-1)*10 + 3) -> Low word at G2003, High at G2004
-            const int offsetPosX = 5;     // U0\G(2000 + (n-1)*10 + 5) -> Low word at G2005, High at G2006
-            const int offsetCenterX = 7;  // U0\G(2000 + (n-1)*10 + 7) -> Low word at G2007, High at G2008
+            const int offsetSpeed = 4;    // U0\G(2000 + (n-1)*10 + 4) -> Low word at G2004, High at G2005
+            const int offsetPosX = 6;     // U0\G(2000 + (n-1)*10 + 6)  <-- Position X
+            const int offsetCenterX = 8;  // U0\G(2000 + (n-1)*10 + 8)  <-- Center X
 
             int n = 1;
             foreach (var row in rowsToSend)
@@ -1326,17 +1336,17 @@ namespace test1
                     continue;
                 }
 
-                short moveCode = MapMotionTypeToPositioningIdentifier(row.MotionType);
+                short moveCode = BuildPositioningIdentifierWord(row.MotionType);
 
                 string deviceBase = $"U0\\G{baseG + (n - 1) * stride}";
 
                 try
                 {
-                    // write full positioning identifier (lower 5 bits), preserves upper bits
+                    // Write full Posn identifier word to U0\G(2000 + (n - 1) * 10).
                     string deviceMove = $"U0\\G{baseG + (n - 1) * stride + offsetMoveCode}";
                     string usedMove;
-                    int rMove = plcComm.WritePositioningIdentifierToDevicePath(deviceMove, moveCode, out usedMove);
-                    AddLogEntry(deviceMove, moveCode.ToString(CultureInfo.InvariantCulture), "Write", rMove == 0 ? "OK" : $"Error({rMove})", $"PositioningId(dec)={moveCode}, hex=0x{moveCode:X4}; {usedMove}");
+                    int rMove = plcComm.WriteInt16ToDevicePath(deviceMove, moveCode, out usedMove);
+                    AddLogEntry(deviceMove, moveCode.ToString(CultureInfo.InvariantCulture), "Write", rMove == 0 ? "OK" : $"Error({rMove})", $"Posn identifier hex=0x{((ushort)moveCode):X4}; {usedMove}");
 
                     // write M code (16-bit, single word)
                     string deviceM = $"U0\\G{baseG + (n - 1) * stride + offsetMCode}";
