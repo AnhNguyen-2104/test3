@@ -1185,21 +1185,47 @@ namespace test1
             }
         }
 
-        private short MapMotionTypeToOperationPattern(string motionType)
+        private short MapMotionTypeToPositioningIdentifier(string motionType)
         {
-            if (string.IsNullOrWhiteSpace(motionType)) return 0;
+            if (string.IsNullOrWhiteSpace(motionType)) return 10;
             string s = motionType.Trim().ToLowerInvariant();
-            
-            bool isEnd = s.Contains("end") || s.Contains("hoàn thành");
-            bool isContinuousPositioning = s.Contains("positioning") || s.Contains("liên tục");
 
-            // 0: Positioning complete (End)
-            // 1: Continuous positioning
-            // 3: Continuous path
-            
-            if (isEnd) return 0;
-            if (isContinuousPositioning) return 1;
-            return 3; // Default to Continuous path
+            bool isEnd = s.Contains("end") || s.Contains("hoàn thành");
+            bool isContinuousPath = s.Contains("continuous path");
+            bool isContinuousPositioning = s.Contains("continuous positioning");
+
+            // Fallback for old Vietnamese labels.
+            if (!isContinuousPath && !isContinuousPositioning)
+            {
+                if (s.Contains("liên tục")) isContinuousPath = true;
+                if (s.Contains("điểm kế tiếp")) isContinuousPositioning = true;
+            }
+
+            // Positioning identifier in decimal values (16-bit word):
+            // Linear: 10 / 11 / 12
+            // Arc CW: 15 / 16 / 17
+            // Arc CCW: 16 / 17 / 18
+            short baseCode = 10; // linear default
+            if (s.Contains("arc cw"))
+            {
+                baseCode = 15;
+            }
+            else if (s.Contains("arc ccw"))
+            {
+                baseCode = 16;
+            }
+            else if (s.Contains("circle"))
+            {
+                // Circle is treated as CW by default unless explicitly marked CCW.
+                baseCode = s.Contains("ccw") ? (short)16 : (short)15;
+            }
+
+            if (isEnd) return baseCode;
+            if (isContinuousPositioning) return (short)(baseCode + 1);
+            if (isContinuousPath) return (short)(baseCode + 2);
+
+            // Safe default: continuous path for smoother chain execution.
+            return (short)(baseCode + 2);
         }
 
         private async Task HandleSendCadXAsync()
@@ -1271,17 +1297,17 @@ namespace test1
                     if (int.TryParse(row.Speed, NumberStyles.Any, CultureInfo.InvariantCulture, out parsed)) speedVal = parsed;
                 }
 
-                short moveCode = MapMotionTypeToOperationPattern(row.MotionType);
+                short moveCode = MapMotionTypeToPositioningIdentifier(row.MotionType);
 
                 string deviceBase = $"U0\\G{baseG + (n - 1) * stride}";
 
                 try
                 {
-                    // write move code (Da.1 only, preserves Da.2-5)
+                    // write full positioning identifier (lower 5 bits), preserves upper bits
                     string deviceMove = $"U0\\G{baseG + (n - 1) * stride + offsetMoveCode}";
                     string usedMove;
-                    int rMove = plcComm.WriteOperationPatternToDevicePath(deviceMove, moveCode, out usedMove);
-                    AddLogEntry(deviceMove, "0x" + moveCode.ToString("X4"), "Write", rMove == 0 ? "OK" : $"Error({rMove})", "Da.1:" + usedMove);
+                    int rMove = plcComm.WritePositioningIdentifierToDevicePath(deviceMove, moveCode, out usedMove);
+                    AddLogEntry(deviceMove, moveCode.ToString(CultureInfo.InvariantCulture), "Write", rMove == 0 ? "OK" : $"Error({rMove})", $"PositioningId(dec)={moveCode}, hex=0x{moveCode:X4}; {usedMove}");
 
                     // write M code
                     string deviceM = $"U0\\G{baseG + (n - 1) * stride + offsetMCode}";

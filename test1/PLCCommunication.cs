@@ -320,6 +320,38 @@ namespace test1
         }
 
         /// <summary>
+        /// Update Positioning Identifier (lower 5 bits) without touching other bits in the same word.
+        /// This is used for values like 0x000A, 0x000B, 0x000C, 0x000F...
+        /// </summary>
+        public int WritePositioningIdentifierToDevicePath(string devicePath, short identifierValue, out string usedMethod)
+        {
+            usedMethod = "";
+            if (!isConnected) throw new InvalidOperationException("Chưa kết nối PLC");
+
+            if (TryParseUDevicePath(devicePath, out int startIO, out int address))
+            {
+                usedMethod = "ReadBuffer -> Modify (lower5) -> WriteBuffer";
+                try
+                {
+                    short[] sData = new short[1];
+                    int resRead = plcDevice.ReadBuffer(startIO, address, 1, out sData[0]);
+                    if (resRead != 0) return resRead;
+
+                    // Keep upper bits, replace only Positioning Identifier field (b0..b4).
+                    sData[0] = (short)(sData[0] & ~0x001F);
+                    sData[0] = (short)(sData[0] | (identifierValue & 0x001F));
+
+                    return plcDevice.WriteBuffer(startIO, address, 1, ref sData[0]);
+                }
+                catch (Exception ex)
+                {
+                    throw new Exception($"Lỗi WritePositioningIdentifierToDevicePath: {GetInnermostMessage(ex)}");
+                }
+            }
+            throw new ArgumentException("Path must be a buffer address (U\\G).");
+        }
+
+        /// <summary>
         /// Ghi số 32-bit theo thứ tự Low Word -> High Word.
         /// Ví dụ: G2006 (L) và G2007 (H).
         /// </summary>
