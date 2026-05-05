@@ -20,6 +20,8 @@ namespace test1
         private static readonly int[] MonitorBaseG = { 800, 900, 1000, 1100 };
         // Control base: Axis1=G1500, Axis2=G1600, Axis3=G1700, Axis4=G1800
         private static readonly int[] ControlBaseG = { 1500, 1600, 1700, 1800 };
+        // Program data base (Move/Mcode/Dwell/Speed/Position/Center): Axis1=G2000...
+        private static readonly int[] ProgramBaseG = { 2000, 2100, 2200, 2300 };
 
         // Monitor offsets (from MonitorBaseG)
         private const int OffCurrentPos = 0;      // Current Feed Value (32-bit)
@@ -1245,7 +1247,9 @@ namespace test1
                 return;
             }
 
-            const int baseG = 2000;
+            // sendCadX = Axis 1 (X axis). Other axes use ProgramBaseG[1..3].
+            int axisIndex = 0;
+            int baseG = ProgramBaseG[axisIndex];
             const int stride = 10;
             // follow buffer mapping exactly for X axis
             const int offsetMoveCode = 0; // U0\G(2000 + (n-1)*10 + 0)
@@ -1297,6 +1301,19 @@ namespace test1
                     if (int.TryParse(row.Speed, NumberStyles.Any, CultureInfo.InvariantCulture, out parsed)) speedVal = parsed;
                 }
 
+                if (mcodeVal < short.MinValue || mcodeVal > short.MaxValue)
+                {
+                    await NotifyAsync("error", "Telemetry", $"M code out of 16-bit range at point {n}: {mcodeVal}");
+                    n++;
+                    continue;
+                }
+                if (dwellVal < short.MinValue || dwellVal > short.MaxValue)
+                {
+                    await NotifyAsync("error", "Telemetry", $"Dwell out of 16-bit range at point {n}: {dwellVal}");
+                    n++;
+                    continue;
+                }
+
                 short moveCode = MapMotionTypeToPositioningIdentifier(row.MotionType);
 
                 string deviceBase = $"U0\\G{baseG + (n - 1) * stride}";
@@ -1309,16 +1326,16 @@ namespace test1
                     int rMove = plcComm.WritePositioningIdentifierToDevicePath(deviceMove, moveCode, out usedMove);
                     AddLogEntry(deviceMove, moveCode.ToString(CultureInfo.InvariantCulture), "Write", rMove == 0 ? "OK" : $"Error({rMove})", $"PositioningId(dec)={moveCode}, hex=0x{moveCode:X4}; {usedMove}");
 
-                    // write M code
+                    // write M code (16-bit, single word)
                     string deviceM = $"U0\\G{baseG + (n - 1) * stride + offsetMCode}";
                     string usedM;
-                    int rM = plcComm.WriteInt32ToDevicePath(deviceM, mcodeVal, out usedM);
+                    int rM = plcComm.WriteInt16ToDevicePath(deviceM, (short)mcodeVal, out usedM);
                     AddLogEntry(deviceM, mcodeVal.ToString(CultureInfo.InvariantCulture), "Write", rM == 0 ? "OK" : $"Error({rM})", "MCode:" + usedM);
 
-                    // write dwell
+                    // write dwell (16-bit, single word)
                     string deviceDwell = $"U0\\G{baseG + (n - 1) * stride + offsetDwell}";
                     string usedD;
-                    int rD = plcComm.WriteInt32ToDevicePath(deviceDwell, dwellVal, out usedD);
+                    int rD = plcComm.WriteInt16ToDevicePath(deviceDwell, (short)dwellVal, out usedD);
                     AddLogEntry(deviceDwell, dwellVal.ToString(CultureInfo.InvariantCulture), "Write", rD == 0 ? "OK" : $"Error({rD})", "Dwell:" + usedD);
 
                     // write speed

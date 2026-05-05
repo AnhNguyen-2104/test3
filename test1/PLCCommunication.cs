@@ -366,6 +366,32 @@ namespace test1
             return WriteBuffer(startIO, address, sData);
         }
 
+        /// <summary>
+        /// Write a single 16-bit word to device path (especially U\G buffer address).
+        /// </summary>
+        public int WriteInt16ToDevicePath(string devicePath, short value, out string usedMethod)
+        {
+            usedMethod = "";
+            if (string.IsNullOrWhiteSpace(devicePath))
+                return -1;
+
+            if (TryParseUDevicePath(devicePath, out int u, out int g))
+            {
+                usedMethod = "WriteBuffer x1 (16-bit)";
+                try
+                {
+                    return WriteBuffer(u, g, new short[] { value });
+                }
+                catch
+                {
+                    // Fallback below
+                }
+            }
+
+            usedMethod = "SetDevice2 (16-bit)";
+            return plcDevice.SetDevice2(devicePath, value);
+        }
+
         public int WriteInt32ToDevicePath(string devicePath, int value, out string usedMethod)
         {
             usedMethod = "";
