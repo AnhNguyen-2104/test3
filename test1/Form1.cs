@@ -1320,8 +1320,8 @@ namespace test1
                 if (!string.IsNullOrWhiteSpace(row.Speed))
                 {
                     int parsed;
-                    // QD75 speed unit = 0.01 mm/min → nhân 100 để chuyển từ mm/min sang đơn vị PLC
-                    if (int.TryParse(row.Speed, NumberStyles.Any, CultureInfo.InvariantCulture, out parsed)) speedVal = parsed * 100;
+                    // QD75 Command speed (Cd.5) đơn vị là mm/min trực tiếp → ghi nguyên giá trị
+                    if (int.TryParse(row.Speed, NumberStyles.Any, CultureInfo.InvariantCulture, out parsed)) speedVal = parsed;
                 }
 
                 if (mcodeVal < short.MinValue || mcodeVal > short.MaxValue)
@@ -1361,30 +1361,45 @@ namespace test1
                     int rD = plcComm.WriteInt16ToDevicePath(deviceDwell, (short)dwellVal, out usedD);
                     AddLogEntry(deviceDwell, dwellVal.ToString(CultureInfo.InvariantCulture), "Write", rD == 0 ? "OK" : $"Error({rD})", "Dwell:" + usedD);
 
-                    // write speed
-                    string deviceSpeed = $"U0\\G{baseG + (n - 1) * stride + offsetSpeed}";
-                    string usedS;
-                    int rS = plcComm.WriteInt32ToDevicePath(deviceSpeed, speedVal, out usedS);
-                    AddLogEntry(deviceSpeed, speedVal.ToString(CultureInfo.InvariantCulture), "Write", rS == 0 ? "OK" : $"Error({rS})", "Speed:" + usedS);
+                    // write speed (32-bit) — ghi từng word riêng để tránh lỗi COM marshaling
+                    int speedAddrBase = baseG + (n - 1) * stride + offsetSpeed;
+                    short speedLow = (short)(speedVal & 0xFFFF);
+                    short speedHigh = (short)((speedVal >> 16) & 0xFFFF);
+                    string deviceSpeedL = $"U0\\G{speedAddrBase}";
+                    string deviceSpeedH = $"U0\\G{speedAddrBase + 1}";
+                    string usedSL, usedSH;
+                    int rSL = plcComm.WriteInt16ToDevicePath(deviceSpeedL, speedLow, out usedSL);
+                    int rSH = plcComm.WriteInt16ToDevicePath(deviceSpeedH, speedHigh, out usedSH);
+                    AddLogEntry(deviceSpeedL, $"{speedVal} (L={speedLow},H={speedHigh})", "Write", (rSL == 0 && rSH == 0) ? "OK" : $"Error(L={rSL},H={rSH})", "Speed 32-bit");
 
-                    // write position X
+                    // write position X (32-bit) — ghi từng word riêng
                     if (hasEnd)
                     {
-                        string devicePosX = $"U0\\G{baseG + (n - 1) * stride + offsetPosX}";
-                        string usedX;
-                        int rX = plcComm.WriteInt32ToDevicePath(devicePosX, endX, out usedX);
-                        AddLogEntry(devicePosX, endX.ToString(CultureInfo.InvariantCulture), "Write", rX == 0 ? "OK" : $"Error({rX})", usedX);
-                        if (rX != 0) await NotifyAsync("error", "Telemetry", $"Failed to write End X {devicePosX}: {rX}");
+                        int posAddrBase = baseG + (n - 1) * stride + offsetPosX;
+                        short posLow = (short)(endX & 0xFFFF);
+                        short posHigh = (short)((endX >> 16) & 0xFFFF);
+                        string devicePosL = $"U0\\G{posAddrBase}";
+                        string devicePosH = $"U0\\G{posAddrBase + 1}";
+                        string usedPL, usedPH;
+                        int rPL = plcComm.WriteInt16ToDevicePath(devicePosL, posLow, out usedPL);
+                        int rPH = plcComm.WriteInt16ToDevicePath(devicePosH, posHigh, out usedPH);
+                        AddLogEntry(devicePosL, $"{endX} (L={posLow},H={posHigh})", "Write", (rPL == 0 && rPH == 0) ? "OK" : $"Error(L={rPL},H={rPH})", "PosX 32-bit");
+                        if (rPL != 0 || rPH != 0) await NotifyAsync("error", "Telemetry", $"Failed to write End X: L={rPL},H={rPH}");
                     }
 
-                    // write center X
+                    // write center X (32-bit) — ghi từng word riêng
                     if (hasCenter)
                     {
-                        string deviceCenterX = $"U0\\G{baseG + (n - 1) * stride + offsetCenterX}";
-                        string usedCx;
-                        int rCx = plcComm.WriteInt32ToDevicePath(deviceCenterX, centerX, out usedCx);
-                        AddLogEntry(deviceCenterX, centerX.ToString(CultureInfo.InvariantCulture), "Write", rCx == 0 ? "OK" : $"Error({rCx})", usedCx);
-                        if (rCx != 0) await NotifyAsync("error", "Telemetry", $"Failed to write Center X {deviceCenterX}: {rCx}");
+                        int cenAddrBase = baseG + (n - 1) * stride + offsetCenterX;
+                        short cenLow = (short)(centerX & 0xFFFF);
+                        short cenHigh = (short)((centerX >> 16) & 0xFFFF);
+                        string deviceCenL = $"U0\\G{cenAddrBase}";
+                        string deviceCenH = $"U0\\G{cenAddrBase + 1}";
+                        string usedCL, usedCH;
+                        int rCL = plcComm.WriteInt16ToDevicePath(deviceCenL, cenLow, out usedCL);
+                        int rCH = plcComm.WriteInt16ToDevicePath(deviceCenH, cenHigh, out usedCH);
+                        AddLogEntry(deviceCenL, $"{centerX} (L={cenLow},H={cenHigh})", "Write", (rCL == 0 && rCH == 0) ? "OK" : $"Error(L={rCL},H={rCH})", "CenterX 32-bit");
+                        if (rCL != 0 || rCH != 0) await NotifyAsync("error", "Telemetry", $"Failed to write Center X: L={rCL},H={rCH}");
                     }
                 }
                 catch (Exception ex)
