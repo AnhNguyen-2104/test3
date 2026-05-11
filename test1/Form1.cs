@@ -1293,12 +1293,12 @@ namespace test1
                 if (!string.IsNullOrWhiteSpace(row.EndCoordinate))
                 {
                     var parts = row.EndCoordinate.Split(';');
-                    if (parts.Length >= 1 && double.TryParse(parts[0], NumberStyles.Any, CultureInfo.InvariantCulture, out double ex)) { endX = Convert.ToInt32(Math.Round(ex)); hasEnd = true; }
+                    if (parts.Length >= 1 && double.TryParse(parts[0], NumberStyles.Any, CultureInfo.InvariantCulture, out double ex)) { endX = Convert.ToInt32(Math.Round(ex * 10000.0)); hasEnd = true; }
                 }
                 if (!string.IsNullOrWhiteSpace(row.CenterCoordinate))
                 {
                     var parts = row.CenterCoordinate.Split(';');
-                    if (parts.Length >= 1 && double.TryParse(parts[0], NumberStyles.Any, CultureInfo.InvariantCulture, out double cx)) { centerX = Convert.ToInt32(Math.Round(cx)); hasCenter = true; }
+                    if (parts.Length >= 1 && double.TryParse(parts[0], NumberStyles.Any, CultureInfo.InvariantCulture, out double cx)) { centerX = Convert.ToInt32(Math.Round(cx * 10000.0)); hasCenter = true; }
                 }
 
                 // parse M code, dwell, speed
@@ -1393,6 +1393,17 @@ namespace test1
                 }
 
                 n++;
+            }
+
+            try
+            {
+                plcComm.WriteInt16ToDevicePath("U0\\G1500", 1, out string usedStart);
+                AddLogEntry("U0\\G1500", "1", "Write", "OK", "Start Axis 1: " + usedStart);
+            }
+            catch (Exception ex)
+            {
+                AddLogEntry("U0\\G1500", "1", "Write", "Error", ex.Message);
+                await NotifyAsync("error", "Telemetry", "Failed to write 1 to U0\\G1500: " + ex.Message);
             }
 
             await NotifyAsync("success", "Telemetry", "Sent X-axis CAD coordinates to PLC.");
