@@ -1321,7 +1321,7 @@ namespace test1
                 {
                     int parsed;
                     // QD75 Command speed (Cd.5) đơn vị là mm/min trực tiếp → ghi nguyên giá trị
-                    if (int.TryParse(row.Speed, NumberStyles.Any, CultureInfo.InvariantCulture, out parsed)) speedVal = parsed * 10;
+                    if (int.TryParse(row.Speed, NumberStyles.Any, CultureInfo.InvariantCulture, out parsed)) speedVal = parsed * 100;
                 }
 
                 if (mcodeVal < short.MinValue || mcodeVal > short.MaxValue)
