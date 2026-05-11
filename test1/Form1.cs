@@ -1320,7 +1320,8 @@ namespace test1
                 if (!string.IsNullOrWhiteSpace(row.Speed))
                 {
                     int parsed;
-                    if (int.TryParse(row.Speed, NumberStyles.Any, CultureInfo.InvariantCulture, out parsed)) speedVal = parsed;
+                    // QD75 speed unit = 0.01 mm/min → nhân 100 để chuyển từ mm/min sang đơn vị PLC
+                    if (int.TryParse(row.Speed, NumberStyles.Any, CultureInfo.InvariantCulture, out parsed)) speedVal = parsed * 100;
                 }
 
                 if (mcodeVal < short.MinValue || mcodeVal > short.MaxValue)
