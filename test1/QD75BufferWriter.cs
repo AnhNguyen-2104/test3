@@ -15,8 +15,8 @@ namespace test1
         public static readonly int[] MonitorBaseG = { 800, 900, 1000, 1100 };
         // Control base: Axis1=G1500, Axis2=G1600, Axis3=G1700, Axis4=G1800
         public static readonly int[] ControlBaseG = { 1500, 1600, 1700, 1800 };
-        // Program data base (Move/Mcode/Dwell/Speed/Position/Center): Axis1=G2000...
-        public static readonly int[] ProgramBaseG = { 2000, 2100, 2200, 2300 };
+        // Program data base (Move/Mcode/Dwell/Speed/Position/Center): Axis1=G2000, Axis2=G8000, Axis3=G14000, Axis4=G20000
+        public static readonly int[] ProgramBaseG = { 2000, 8000, 14000, 20000 };
 
         // Monitor offsets (from MonitorBaseG)
         public const int OffCurrentPos = 0;      // Current Feed Value (32-bit)
@@ -358,6 +358,117 @@ namespace test1
 
             return result;
         }
+
+        /// <summary>
+        /// Write positioning data for a SLAVE (interpolated follower) axis (Axis 2).
+        /// Per QD75 manual: only Da.6 (positioning address) and Da.7 (arc address) are required.
+        /// Da.1~Da.5 (identifier), Da.8 (speed), Da.9 (dwell) are all ignored by the module.
+        /// Base address is fixed at G8000 (Axis 2 slave buffer), stride = 10 words/point.
+        /// Same coordinate scaling as master axis (× CoordinateMultiplier = ×10000).
+        /// </summary>
+        /// <param name="plcComm">Connected PLCCommunication instance.</param>
+        /// <param name="rows">List of positioning data rows. Only EndCoordinate (Y axis) and CenterCoordinate (Y) are used.</param>
+        /// <param name="slaveBaseG">Buffer base address for slave axis. Default = 8000 (Axis 2).</param>
+        /// <returns>SendResult with all write results.</returns>
+        public static SendResult WriteSlaveAxisData(PLCCommunication plcComm, List<PositioningDataRow> rows, int slaveBaseG = 8000)
+        {
+            var result = new SendResult { Success = true };
+
+            if (plcComm == null || !plcComm.IsConnected)
+            {
+                result.Success = false;
+                result.ErrorMessage = "PLC is not connected.";
+                return result;
+            }
+
+            if (rows == null || rows.Count == 0)
+            {
+                result.Success = false;
+                result.ErrorMessage = "No points to send.";
+                return result;
+            }
+
+            int n = 1;
+            foreach (var row in rows)
+            {
+                // Parse Y coordinate from EndCoordinate ("X;Y" format) → Da.6 position
+                int endY = 0;
+                bool hasEnd = TryParseCoordinateY(row.EndCoordinate, out endY);
+
+                // Parse Y coordinate from CenterCoordinate → Da.7 arc address
+                int centerY = 0;
+                bool hasCenter = TryParseCoordinateY(row.CenterCoordinate, out centerY);
+
+                int blockBase = slaveBaseG + (n - 1) * Stride;
+
+                try
+                {
+                    // Các thông số Da.1~Da.5 (Định danh), Da.10 (M-code), Da.9 (Dwell), Da.8 (Speed)
+                    // trên Trục 2 (Slave) được QD75 bỏ qua, nhưng ta ghi 0 để đảm bảo bộ nhớ đệm sạch sẽ.
+                    var rMove = Write16(plcComm, blockBase + OffsetMoveCode, 0, "Slave Identifier");
+                    result.WriteResults.Add(rMove);
+
+                    var rM = Write16(plcComm, blockBase + OffsetMCode, 0, "Slave MCode");
+                    result.WriteResults.Add(rM);
+
+                    var rD = Write16(plcComm, blockBase + OffsetDwell, 0, "Slave Dwell");
+                    result.WriteResults.Add(rD);
+
+                    var rS = Write32(plcComm, blockBase + OffsetSpeed, 0, "Slave Speed");
+                    result.WriteResults.Add(rS);
+
+                    // Da.6 Positioning address (32-bit) — U0\G(8000 + (n-1)*10 + 6)
+                    // Đây là thông số BẮT BUỘC duy nhất trên trục phụ.
+                    if (hasEnd)
+                    {
+                        var rP = Write32(plcComm, blockBase + OffsetPosX, endY, "Slave PosY");
+                        result.WriteResults.Add(rP);
+                        if (!rP.Status.StartsWith("OK")) result.Success = false;
+                    }
+
+                    // Da.7 Arc address (32-bit) — U0\G(8000 + (n-1)*10 + 8)
+                    if (hasCenter)
+                    {
+                        var rC = Write32(plcComm, blockBase + OffsetCenterX, centerY, "Slave CenterY");
+                        result.WriteResults.Add(rC);
+                        if (!rC.Status.StartsWith("OK")) result.Success = false;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    result.WriteResults.Add(new WriteResult
+                    {
+                        Address = $"U0\\G{blockBase + OffsetPosX}",
+                        Value   = string.Empty,
+                        Status  = "Error",
+                        Message = ex.Message
+                    });
+                    result.Success = false;
+                }
+
+                n++;
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// Parse coordinate string "X;Y" and return Y component multiplied by CoordinateMultiplier.
+        /// Used for slave axis where only the Y (second axis) coordinate matters.
+        /// </summary>
+        private static bool TryParseCoordinateY(string coordinate, out int scaledY)
+        {
+            scaledY = 0;
+            if (string.IsNullOrWhiteSpace(coordinate)) return false;
+            var parts = coordinate.Split(';');
+            if (parts.Length >= 2 && double.TryParse(parts[1], NumberStyles.Any, CultureInfo.InvariantCulture, out double val))
+            {
+                scaledY = Convert.ToInt32(Math.Round(val * CoordinateMultiplier));
+                return true;
+            }
+            return false;
+        }
+
 
         /// <summary>
         /// Write a single 32-bit value to a device path and return a WriteResult.
