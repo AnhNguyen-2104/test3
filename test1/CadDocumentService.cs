@@ -29,7 +29,7 @@ namespace test1
 
             foreach (EntityObject entity in document.Entities.All)
             {
-                ExtractEntity(entity, CadTransform.Identity, context);
+                ExtractEntity(entity, CadTransform.Identity, context, 0);
             }
 
             return new CadLoadResult
@@ -43,9 +43,9 @@ namespace test1
             };
         }
 
-        private void ExtractEntity(EntityObject entity, CadTransform transform, CadExtractionContext context)
+        private void ExtractEntity(EntityObject entity, CadTransform transform, CadExtractionContext context, int depth)
         {
-            if (entity == null || !entity.IsVisible)
+            if (entity == null || !entity.IsVisible || depth > 50)
             {
                 return;
             }
@@ -110,7 +110,7 @@ namespace test1
                 CadTransform child = transform.Append(CadTransform.FromInsert(insert));
                 foreach (EntityObject childEntity in insert.Block.Entities)
                 {
-                    ExtractEntity(childEntity, child, context);
+                    ExtractEntity(childEntity, child, context, depth + 1);
                 }
             }
         }
@@ -326,7 +326,7 @@ namespace test1
 
             public List<CadPointData> BuildPointRows()
             {
-                AddIntersectionPoints();
+                // AddIntersectionPoints(); // Vô hiệu hoá để tránh lỗi OutOfMemory/treo app với file DXF lớn
 
                 List<CadPointAccumulator> ordered = pointAccumulators.Values
                     .OrderBy(p => p.Priority)
