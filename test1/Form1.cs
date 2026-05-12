@@ -85,6 +85,7 @@ namespace test1
         private string selectedCadPointKey;
         private string globalZDown = "";
         private string globalZSafe = "";
+        private string globalSpeed = "1000";
 
         // UI state
         private volatile bool webReady;

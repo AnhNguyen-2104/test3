@@ -58,6 +58,9 @@ namespace test1
                         $"Loaded file: {activeCadDocument?.FileName ?? Path.GetFileName(selectedPath)}");
                     await NotifyAsync("success", "DXF",
                         $"Loaded: {activeCadDocument?.FileName ?? Path.GetFileName(selectedPath)}");
+
+                    // Bỏ qua nhấn Import: Tự động chạy Import ngay sau khi load xong DXF
+                    await HandleImportCadToProcessAsync();
                 }
                 catch (Exception ex)
                 {
@@ -97,6 +100,7 @@ namespace test1
         {
             if (string.Equals(key, "speed", StringComparison.OrdinalIgnoreCase))
             {
+                globalSpeed = value;
                 foreach (var row in processRows)
                     row.Speed = value;
             }
@@ -157,6 +161,10 @@ namespace test1
                     row.MCodeValue = "1";
                 if (glueEndCoord != null && string.Equals(row.EndCoordinate, glueEndCoord))
                     row.MCodeValue = "2";
+
+                // Lấy giá trị speed mặc định từ ô mới
+                if (string.IsNullOrEmpty(row.Speed))
+                    row.Speed = globalSpeed;
             }
 
             processRows.Clear();
@@ -229,15 +237,10 @@ namespace test1
                 return;
             }
 
-            // ── BƯỚC 3: Phát lệnh START cho Master Axis (Trục 1) ────────────────────
-            // Chỉ khi cả 2 trục đã nạp xong toạ độ, ta mới kích hoạt chạy máy.
-            var startResult = QD75BufferWriter.ExecuteStartNo(plcComm, 0, 1);
-            AddLogEntry(startResult.Address, startResult.Value, "Write", startResult.Status, startResult.Message);
+            // Không tự động ghi Start No. vào G1500 nữa.
+            // Người dùng sẽ nhấn nút "START ACTION (M2000)" trên giao diện để kích hoạt chạy máy.
+            await NotifyAsync("success", "PLC", $"CAD data loaded: {dataRows.Count} points → Axis 1 (G2000+) & Axis 2 (G8006+). Press START ACTION to run.");
 
-            if (startResult.Status == "OK")
-                await NotifyAsync("success", "PLC", "CAD Data Sent & Axis 1 Started Successfully.");
-            else
-                await NotifyAsync("error", "PLC", "Failed to start Axis 1: " + startResult.Message);
 
         }
 
