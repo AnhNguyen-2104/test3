@@ -1,0 +1,447 @@
+using System;
+using System.Collections.Generic;
+using System.Globalization;
+
+namespace test1
+{
+    /// <summary>
+    /// Handles all QD75 Positioning Module buffer memory (Un\Gx) read/write operations.
+    /// Extracted from Form1 to keep the main form code clean.
+    /// </summary>
+    public class QD75BufferWriter
+    {
+        // QD75 Positioning Module Buffer Memory Addresses
+        // Monitor base: Axis1=G800, Axis2=G900, Axis3=G1000, Axis4=G1100
+        public static readonly int[] MonitorBaseG = { 800, 900, 1000, 1100 };
+        // Control base: Axis1=G1500, Axis2=G1600, Axis3=G1700, Axis4=G1800
+        public static readonly int[] ControlBaseG = { 1500, 1600, 1700, 1800 };
+        // Program data base (Move/Mcode/Dwell/Speed/Position/Center): Axis1=G2000...
+        public static readonly int[] ProgramBaseG = { 2000, 2100, 2200, 2300 };
+
+        // Monitor offsets (from MonitorBaseG)
+        public const int OffCurrentPos = 0;      // Current Feed Value (32-bit)
+        public const int OffCurrentSpeed = 4;     // Current Speed (32-bit)
+        public const int OffErrorCode = 6;        // Error Code (16-bit)
+        public const int OffWarningCode = 7;      // Warning Code (16-bit)
+        public const int OffAxisStatus = 9;       // Axis Status Md.26 (16-bit)
+
+        // Control offsets (from ControlBaseG)
+        public const int OffStartNo = 0;          // Start No. (16-bit)
+        public const int OffErrorReset = 2;       // Error Reset (16-bit)
+        public const int OffJogSpeed = 4;         // JOG Speed (32-bit)
+        public const int OffNewSpeed = 18;        // New Speed Value (32-bit)
+
+        // Program data offsets within each positioning data block (stride = 10 words)
+        public const int Stride = 10;
+        public const int OffsetMoveCode = 0;  // U0\G(base + (n-1)*10 + 0)
+        public const int OffsetMCode = 1;     // U0\G(base + (n-1)*10 + 1)
+        public const int OffsetDwell = 2;     // U0\G(base + (n-1)*10 + 2)
+        public const int OffsetSpeed = 4;     // U0\G(base + (n-1)*10 + 4) -> 32-bit (L, H)
+        public const int OffsetPosX = 6;      // U0\G(base + (n-1)*10 + 6) -> 32-bit (L, H)
+        public const int OffsetCenterX = 8;   // U0\G(base + (n-1)*10 + 8) -> 32-bit (L, H)
+
+        // Coordinate multiplier: DXF mm → QD75 0.1µm units
+        public const double CoordinateMultiplier = 10000.0;
+        // Speed multiplier: user mm/min → QD75 speed units
+        public const int SpeedMultiplier = 100;
+
+        /// <summary>
+        /// Result of a single buffer write operation.
+        /// </summary>
+        public class WriteResult
+        {
+            public string Address { get; set; }
+            public string Value { get; set; }
+            public string Status { get; set; }
+            public string Message { get; set; }
+        }
+
+        /// <summary>
+        /// Data structure for one positioning data row to write to PLC.
+        /// </summary>
+        public class PositioningDataRow
+        {
+            public string MotionType { get; set; }
+            public string MCodeValue { get; set; }
+            public string Dwell { get; set; }
+            public string Speed { get; set; }
+            public string EndCoordinate { get; set; }
+            public string CenterCoordinate { get; set; }
+        }
+
+        /// <summary>
+        /// Result of writing all positioning data rows.
+        /// </summary>
+        public class SendResult
+        {
+            public bool Success { get; set; }
+            public string ErrorMessage { get; set; }
+            public List<WriteResult> WriteResults { get; set; } = new List<WriteResult>();
+        }
+
+        /// <summary>
+        /// Build QD75 Positioning Identifier word (Da.1 ~ Da.5) from motion type string.
+        /// </summary>
+        public static short BuildPositioningIdentifierWord(string motionType, int interpolatedAxis = 1, int accelTimeNo = 0, int decelTimeNo = 0)
+        {
+            string s = (motionType ?? string.Empty).Trim().ToLowerInvariant();
+
+            bool isEnd = s.Contains("end") || s.Contains("hoàn thành");
+            bool isContinuousPath = s.Contains("continuous path");
+            bool isContinuousPositioning = s.Contains("continuous positioning");
+
+            // Fallback for old Vietnamese labels.
+            if (!isContinuousPath && !isContinuousPositioning)
+            {
+                if (s.Contains("liên tục")) isContinuousPath = true;
+                if (s.Contains("điểm kế tiếp")) isContinuousPositioning = true;
+            }
+
+            int da2ControlSystem = 0x0A; // ABS Linear 2
+            if (s.Contains("arc cw"))
+            {
+                da2ControlSystem = 0x0F;
+            }
+            else if (s.Contains("arc ccw"))
+            {
+                da2ControlSystem = 0x10;
+            }
+            else if (s.Contains("circle"))
+            {
+                da2ControlSystem = s.Contains("ccw") ? 0x10 : 0x0F;
+            }
+
+            int da1OperationPattern = 0x03; // Continuous path
+            if (isEnd)
+            {
+                da1OperationPattern = 0x00;
+            }
+            else if (isContinuousPositioning)
+            {
+                da1OperationPattern = 0x01;
+            }
+            else if (isContinuousPath)
+            {
+                da1OperationPattern = 0x03;
+            }
+
+            int wordValue =
+                ((da2ControlSystem & 0xFF) << 8) |
+                ((interpolatedAxis & 0x03) << 6) |
+                ((decelTimeNo & 0x03) << 4) |
+                ((accelTimeNo & 0x03) << 2) |
+                (da1OperationPattern & 0x03);
+
+            return unchecked((short)wordValue);
+        }
+
+        /// <summary>
+        /// Write a 16-bit value to a U0\G address via PLCCommunication.
+        /// </summary>
+        private static WriteResult Write16(PLCCommunication plcComm, int gAddress, short value, string label)
+        {
+            string devicePath = $"U0\\G{gAddress}";
+            string usedMethod;
+            int result = plcComm.WriteInt16ToDevicePath(devicePath, value, out usedMethod);
+            return new WriteResult
+            {
+                Address = devicePath,
+                Value = value.ToString(CultureInfo.InvariantCulture),
+                Status = result == 0 ? "OK" : $"Error({result})",
+                Message = $"{label}: {usedMethod}"
+            };
+        }
+
+        /// <summary>
+        /// Write a 32-bit value to two consecutive U0\G addresses (Low word, High word).
+        /// Uses individual 16-bit writes to avoid COM marshaling issues with WriteBuffer.
+        /// </summary>
+        private static WriteResult Write32(PLCCommunication plcComm, int gAddress, int value, string label)
+        {
+            short lowWord = (short)(value & 0xFFFF);
+            short highWord = (short)((value >> 16) & 0xFFFF);
+            string deviceL = $"U0\\G{gAddress}";
+            string deviceH = $"U0\\G{gAddress + 1}";
+
+            string usedL, usedH;
+            int rL = plcComm.WriteInt16ToDevicePath(deviceL, lowWord, out usedL);
+            int rH = plcComm.WriteInt16ToDevicePath(deviceH, highWord, out usedH);
+
+            bool ok = (rL == 0 && rH == 0);
+            return new WriteResult
+            {
+                Address = deviceL,
+                Value = $"{value} (L={lowWord},H={highWord})",
+                Status = ok ? "OK" : $"Error(L={rL},H={rH})",
+                Message = $"{label} 32-bit"
+            };
+        }
+
+        /// <summary>
+        /// Parse coordinate string "X;Y" and return X component multiplied by CoordinateMultiplier.
+        /// </summary>
+        private static bool TryParseCoordinateX(string coordinate, out int scaledX)
+        {
+            scaledX = 0;
+            if (string.IsNullOrWhiteSpace(coordinate)) return false;
+            var parts = coordinate.Split(';');
+            if (parts.Length >= 1 && double.TryParse(parts[0], NumberStyles.Any, CultureInfo.InvariantCulture, out double val))
+            {
+                scaledX = Convert.ToInt32(Math.Round(val * CoordinateMultiplier));
+                return true;
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// Parse a string to int, return 0 if invalid.
+        /// </summary>
+        private static int ParseInt(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value)) return 0;
+            int result;
+            if (int.TryParse(value, NumberStyles.Any, CultureInfo.InvariantCulture, out result))
+                return result;
+            return 0;
+        }
+
+        /// <summary>
+        /// Send all positioning data rows to PLC buffer memory for a given axis.
+        /// This is the core buffer write logic extracted from HandleSendCadXAsync.
+        /// </summary>
+        /// <param name="plcComm">Connected PLCCommunication instance.</param>
+        /// <param name="axisIndex">Axis index (0=X, 1=Y, 2=Z, 3=A).</param>
+        /// <param name="rows">List of positioning data rows to write.</param>
+        /// <param name="writeStartNo">If true, write 1 to the Control Start No. register after all data.</param>
+        /// <returns>SendResult with all write results and overall success status.</returns>
+        public static SendResult WritePositioningData(PLCCommunication plcComm, int axisIndex, List<PositioningDataRow> rows, bool writeStartNo = true)
+        {
+            var result = new SendResult { Success = true };
+
+            if (plcComm == null || !plcComm.IsConnected)
+            {
+                result.Success = false;
+                result.ErrorMessage = "PLC is not connected.";
+                return result;
+            }
+
+            if (rows == null || rows.Count == 0)
+            {
+                result.Success = false;
+                result.ErrorMessage = "No points to send.";
+                return result;
+            }
+
+            int baseG = ProgramBaseG[axisIndex];
+            int n = 1;
+
+            foreach (var row in rows)
+            {
+                // Parse coordinates
+                int endX = 0;
+                int centerX = 0;
+                bool hasEnd = TryParseCoordinateX(row.EndCoordinate, out endX);
+                bool hasCenter = TryParseCoordinateX(row.CenterCoordinate, out centerX);
+
+                // Parse M code, dwell, speed
+                int mcodeVal = ParseInt(row.MCodeValue);
+                int dwellVal = ParseInt(row.Dwell);
+                int speedVal = ParseInt(row.Speed) * SpeedMultiplier;
+
+                // Validate 16-bit ranges
+                if (mcodeVal < short.MinValue || mcodeVal > short.MaxValue)
+                {
+                    result.WriteResults.Add(new WriteResult
+                    {
+                        Address = $"Point {n}",
+                        Value = mcodeVal.ToString(),
+                        Status = "Error",
+                        Message = $"M code out of 16-bit range: {mcodeVal}"
+                    });
+                    n++;
+                    continue;
+                }
+                if (dwellVal < short.MinValue || dwellVal > short.MaxValue)
+                {
+                    result.WriteResults.Add(new WriteResult
+                    {
+                        Address = $"Point {n}",
+                        Value = dwellVal.ToString(),
+                        Status = "Error",
+                        Message = $"Dwell out of 16-bit range: {dwellVal}"
+                    });
+                    n++;
+                    continue;
+                }
+
+                short moveCode = BuildPositioningIdentifierWord(row.MotionType);
+                int blockBase = baseG + (n - 1) * Stride;
+
+                try
+                {
+                    // Write Positioning identifier (16-bit)
+                    var rMove = Write16(plcComm, blockBase + OffsetMoveCode, moveCode,
+                        $"Posn identifier hex=0x{((ushort)moveCode):X4}");
+                    result.WriteResults.Add(rMove);
+
+                    // Write M code (16-bit)
+                    var rM = Write16(plcComm, blockBase + OffsetMCode, (short)mcodeVal, "MCode");
+                    result.WriteResults.Add(rM);
+
+                    // Write Dwell (16-bit)
+                    var rD = Write16(plcComm, blockBase + OffsetDwell, (short)dwellVal, "Dwell");
+                    result.WriteResults.Add(rD);
+
+                    // Write Speed (32-bit, two 16-bit words)
+                    var rS = Write32(plcComm, blockBase + OffsetSpeed, speedVal, "Speed");
+                    result.WriteResults.Add(rS);
+
+                    // Write Position X (32-bit, two 16-bit words)
+                    if (hasEnd)
+                    {
+                        var rP = Write32(plcComm, blockBase + OffsetPosX, endX, "PosX");
+                        result.WriteResults.Add(rP);
+                        if (!rP.Status.StartsWith("OK")) result.Success = false;
+                    }
+
+                    // Write Center X (32-bit, two 16-bit words)
+                    if (hasCenter)
+                    {
+                        var rC = Write32(plcComm, blockBase + OffsetCenterX, centerX, "CenterX");
+                        result.WriteResults.Add(rC);
+                        if (!rC.Status.StartsWith("OK")) result.Success = false;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    result.WriteResults.Add(new WriteResult
+                    {
+                        Address = $"U0\\G{blockBase}",
+                        Value = string.Empty,
+                        Status = "Error",
+                        Message = ex.Message
+                    });
+                    result.Success = false;
+                }
+
+                n++;
+            }
+
+            // Write Start No. = 1 to Control base register
+            if (writeStartNo)
+            {
+                try
+                {
+                    string startDevice = $"U0\\G{ControlBaseG[axisIndex]}";
+                    string usedStart;
+                    int rStart = plcComm.WriteInt16ToDevicePath(startDevice, 1, out usedStart);
+                    result.WriteResults.Add(new WriteResult
+                    {
+                        Address = startDevice,
+                        Value = "1",
+                        Status = rStart == 0 ? "OK" : $"Error({rStart})",
+                        Message = "Start Axis " + (axisIndex + 1) + ": " + usedStart
+                    });
+                }
+                catch (Exception ex)
+                {
+                    result.WriteResults.Add(new WriteResult
+                    {
+                        Address = $"U0\\G{ControlBaseG[axisIndex]}",
+                        Value = "1",
+                        Status = "Error",
+                        Message = ex.Message
+                    });
+                    result.Success = false;
+                }
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// Write a single 32-bit value to a device path and return a WriteResult.
+        /// Used for telemetry / manual buffer writes.
+        /// </summary>
+        public static WriteResult WriteBufferValue(PLCCommunication plcComm, string path, int value)
+        {
+            if (plcComm == null || !plcComm.IsConnected)
+            {
+                return new WriteResult
+                {
+                    Address = path,
+                    Value = value.ToString(CultureInfo.InvariantCulture),
+                    Status = "Error",
+                    Message = "PLC is not connected."
+                };
+            }
+
+            try
+            {
+                string used;
+                int result = plcComm.WriteInt32ToDevicePath(path, value, out used);
+                return new WriteResult
+                {
+                    Address = path,
+                    Value = value.ToString(CultureInfo.InvariantCulture),
+                    Status = result == 0 ? "OK" : $"Error({result})",
+                    Message = used
+                };
+            }
+            catch (Exception ex)
+            {
+                return new WriteResult
+                {
+                    Address = path,
+                    Value = value.ToString(CultureInfo.InvariantCulture),
+                    Status = "Error",
+                    Message = ex.Message
+                };
+            }
+        }
+
+        /// <summary>
+        /// Convert raw buffer value to mm (Pr.1=0: raw × 10⁻¹ µm = raw/10000 mm)
+        /// </summary>
+        public static string FormatPositionMm(int rawValue)
+        {
+            double mm = rawValue / 10000.0;
+            return mm.ToString("0.0000", CultureInfo.InvariantCulture);
+        }
+
+        /// <summary>
+        /// Format raw speed value to mm/min (monitor speed: 0.01 mm/min)
+        /// </summary>
+        public static string FormatSpeedMm(int rawValue)
+        {
+            double mmMin = rawValue / 100.0;
+            return mmMin.ToString("0.00", CultureInfo.InvariantCulture);
+        }
+
+        /// <summary>
+        /// Format axis status code to human-readable string.
+        /// </summary>
+        public static string FormatAxisStatus(int status)
+        {
+            switch (status)
+            {
+                case -2: return "Step standby";
+                case -1: return "Error";
+                case 0: return "Standby";
+                case 1: return "Stopped";
+                case 2: return "Interpolation";
+                case 3: return "JOG operation";
+                case 4: return "Manual pulse generator";
+                case 5: return "Analyzing";
+                case 6: return "Special start standby";
+                case 7: return "OPR (Homing)";
+                case 8: return "Position control";
+                case 9: return "Speed control";
+                case 10: return "Speed ctrl (spd-pos)";
+                case 11: return "Pos ctrl (spd-pos)";
+                case 12: return "Pos ctrl (pos-spd)";
+                default: return $"Unknown ({status})";
+            }
+        }
+    }
+}

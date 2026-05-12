@@ -85,7 +85,23 @@
     <Compile Include="Form1.Designer.cs">
       <DependentUpon>Form1.cs</DependentUpon>
     </Compile>
+    <Compile Include="Form1.MessageHandler.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="Form1.PlcControl.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="Form1.DxfHandler.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="Form1.StatePublisher.cs">
+      <SubType>Form</SubType>
+    </Compile>
+    <Compile Include="Form1.Models.cs">
+      <SubType>Form</SubType>
+    </Compile>
     <Compile Include="PLCCommunication.cs" />
+    <Compile Include="QD75BufferWriter.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <EmbeddedResource Include="Form1.resx">
