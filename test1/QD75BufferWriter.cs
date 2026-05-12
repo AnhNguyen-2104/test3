@@ -81,59 +81,57 @@ namespace test1
 
         /// <summary>
         /// Build QD75 Positioning Identifier word (Da.1 ~ Da.5) from motion type string.
+        ///
+        /// Correct bit layout (per QD75 manual):
+        ///   b1 – b0  : Da.1 Operation pattern  (00=END, 01=Cont.Pos, 11=Cont.Path)
+        ///   b3 – b2  : Da.5 Axis to interpolate (00=Axis1, 01=Axis2, 10=Axis3, 11=Axis4)
+        ///   b5 – b4  : Da.3 Acceleration time No. (0–3)
+        ///   b7 – b6  : Da.4 Deceleration time No. (0–3)
+        ///   b15– b8  : Da.2 Control system
         /// </summary>
-        public static short BuildPositioningIdentifierWord(string motionType, int interpolatedAxis = 1, int accelTimeNo = 0, int decelTimeNo = 0)
+        public static short BuildPositioningIdentifierWord(
+            string motionType,
+            int partnerAxis = 1,    // 0=Axis1, 1=Axis2, 2=Axis3, 3=Axis4
+            int accelTimeNo = 0,
+            int decelTimeNo = 0)
         {
             string s = (motionType ?? string.Empty).Trim().ToLowerInvariant();
 
+            // ── Da.1 Operation pattern ────────────────────────────────────────────
+            // b1–b0: 00=PositioningComplete(END), 01=ContinuousPositioning, 11=ContinuousPath
+            int da1 = 0x00; // default: Positioning Complete (END)
             bool isEnd = s.Contains("end") || s.Contains("hoàn thành");
-            bool isContinuousPath = s.Contains("continuous path");
-            bool isContinuousPositioning = s.Contains("continuous positioning");
 
-            // Fallback for old Vietnamese labels.
-            if (!isContinuousPath && !isContinuousPositioning)
+            if (!isEnd)
             {
-                if (s.Contains("liên tục")) isContinuousPath = true;
-                if (s.Contains("điểm kế tiếp")) isContinuousPositioning = true;
+                bool isContinuousPositioning = s.Contains("continuous positioning") || s.Contains("điểm kế tiếp");
+                bool isContinuousPath        = s.Contains("continuous path")        || s.Contains("liên tục");
+                if (isContinuousPositioning)       da1 = 0x01;
+                else if (isContinuousPath)         da1 = 0x03;
+                else                               da1 = 0x03; // default to continuous path for mid-points
             }
 
-            int da2ControlSystem = 0x0A; // ABS Linear 2
-            if (s.Contains("arc cw"))
-            {
-                da2ControlSystem = 0x0F;
-            }
-            else if (s.Contains("arc ccw"))
-            {
-                da2ControlSystem = 0x10;
-            }
+            // ── Da.2 Control system ───────────────────────────────────────────────
+            // b15–b8
+            int da2;
+            if      (s.Contains("arc cw")  || s.Contains("arc circular right")) da2 = 0x0F; // ABS_CircularRight
+            else if (s.Contains("arc ccw") || s.Contains("arc circular left"))  da2 = 0x10; // ABS_CircularLeft
             else if (s.Contains("circle"))
-            {
-                da2ControlSystem = s.Contains("ccw") ? 0x10 : 0x0F;
-            }
+                da2 = s.Contains("ccw") ? 0x10 : 0x0F;                                      // circle default CW
+            else
+                da2 = 0x0A;                                                                  // ABS_Linear2
 
-            int da1OperationPattern = 0x03; // Continuous path
-            if (isEnd)
-            {
-                da1OperationPattern = 0x00;
-            }
-            else if (isContinuousPositioning)
-            {
-                da1OperationPattern = 0x01;
-            }
-            else if (isContinuousPath)
-            {
-                da1OperationPattern = 0x03;
-            }
+            // ── Da.5 Partner axis (b3–b2), Da.3 Acc (b5–b4), Da.4 Dec (b7–b6) ──
+            int da5 = partnerAxis & 0x03;
+            int da3 = accelTimeNo & 0x03;
+            int da4 = decelTimeNo & 0x03;
 
-            int wordValue =
-                ((da2ControlSystem & 0xFF) << 8) |
-                ((interpolatedAxis & 0x03) << 6) |
-                ((decelTimeNo & 0x03) << 4) |
-                ((accelTimeNo & 0x03) << 2) |
-                (da1OperationPattern & 0x03);
+            // Assemble: b1-b0=Da.1 | b3-b2=Da.5 | b5-b4=Da.3 | b7-b6=Da.4 | b15-b8=Da.2
+            int wordValue = da1 | (da5 << 2) | (da3 << 4) | (da4 << 6) | (da2 << 8);
 
             return unchecked((short)wordValue);
         }
+
 
         /// <summary>
         /// Write a 16-bit value to a U0\G address via PLCCommunication.
@@ -540,6 +538,35 @@ namespace test1
                 case 11: return "Pos ctrl (spd-pos)";
                 case 12: return "Pos ctrl (pos-spd)";
                 default: return $"Unknown ({status})";
+            }
+        }
+        /// <summary>
+        /// Manually execute a start command by writing the Start No. to the axis control register.
+        /// Useful for starting a master axis only after all slave axis data has been fully written.
+        /// </summary>
+        public static WriteResult ExecuteStartNo(PLCCommunication plcComm, int axisIndex, int startNo = 1)
+        {
+            if (plcComm == null || !plcComm.IsConnected)
+            {
+                return new WriteResult { Status = "Error", Message = "PLC not connected" };
+            }
+
+            try
+            {
+                string startDevice = $"U0\\G{ControlBaseG[axisIndex]}";
+                string used;
+                int result = plcComm.WriteInt16ToDevicePath(startDevice, (short)startNo, out used);
+                return new WriteResult
+                {
+                    Address = startDevice,
+                    Value   = startNo.ToString(),
+                    Status  = result == 0 ? "OK" : $"Error({result})",
+                    Message = $"Manual Start Axis {axisIndex + 1}: {used}"
+                };
+            }
+            catch (Exception ex)
+            {
+                return new WriteResult { Address = $"U0\\G{ControlBaseG[axisIndex]}", Status = "Error", Message = ex.Message };
             }
         }
     }

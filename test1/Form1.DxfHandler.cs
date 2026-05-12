@@ -196,24 +196,24 @@ namespace test1
                 });
             }
 
-            // ── Master axis (Axis 1 / X): ghi đầy đủ Da.1~Da.9 ──────────────────
-            var sendResult = QD75BufferWriter.WritePositioningData(plcComm, 0, dataRows, writeStartNo: true);
+            // ── BƯỚC 1: Master axis (Axis 1 / X): nạp dữ liệu vào bộ đệm (G2000+) ────
+            // Tắt writeStartNo để máy KHÔNG chạy ngay lập tức.
+            var sendResult = QD75BufferWriter.WritePositioningData(plcComm, 0, dataRows, writeStartNo: false);
 
             foreach (var wr in sendResult.WriteResults)
             {
                 AddLogEntry(wr.Address, wr.Value, "Write", wr.Status, wr.Message);
                 if (!wr.Status.StartsWith("OK"))
-                    await NotifyAsync("error", "Telemetry", $"{wr.Address}: {wr.Message}");
+                    await NotifyAsync("error", "Telemetry [Axis1]", $"{wr.Address}: {wr.Message}");
             }
 
-            if (sendResult.Success)
-                await NotifyAsync("success", "Telemetry [Axis1]", "Sent master axis (X) CAD coordinates to PLC.");
-            else if (!string.IsNullOrEmpty(sendResult.ErrorMessage))
-                await NotifyAsync("error", "Telemetry [Axis1]", sendResult.ErrorMessage);
+            if (!sendResult.Success)
+            {
+                await NotifyAsync("error", "Telemetry [Axis1]", "Failed to load Axis 1 buffer.");
+                return;
+            }
 
-            // ── Slave axis (Axis 2 / Y): chỉ ghi Da.6 (position Y) và Da.7 (arc Y) ──
-            // Theo tài liệu QD75: Da.1~Da.5, tốc độ, dwell đều bị module bỏ qua trên trục phụ.
-            // Base address cố định tại G8000 (Axis 2 slave buffer), stride 10 words/điểm.
+            // ── BƯỚC 2: Slave axis (Axis 2 / Y): nạp toạ độ vào bộ đệm (G8006+) ──────
             var slaveResult = QD75BufferWriter.WriteSlaveAxisData(plcComm, dataRows, slaveBaseG: 8000);
 
             foreach (var wr in slaveResult.WriteResults)
@@ -223,10 +223,21 @@ namespace test1
                     await NotifyAsync("error", "Telemetry [Axis2]", $"{wr.Address}: {wr.Message}");
             }
 
-            if (slaveResult.Success)
-                await NotifyAsync("success", "Telemetry [Axis2]", "Sent slave axis (Y) coordinates to PLC (G8000+).");
-            else if (!string.IsNullOrEmpty(slaveResult.ErrorMessage))
-                await NotifyAsync("error", "Telemetry [Axis2]", slaveResult.ErrorMessage);
+            if (!slaveResult.Success)
+            {
+                await NotifyAsync("error", "Telemetry [Axis2]", "Failed to load Axis 2 buffer.");
+                return;
+            }
+
+            // ── BƯỚC 3: Phát lệnh START cho Master Axis (Trục 1) ────────────────────
+            // Chỉ khi cả 2 trục đã nạp xong toạ độ, ta mới kích hoạt chạy máy.
+            var startResult = QD75BufferWriter.ExecuteStartNo(plcComm, 0, 1);
+            AddLogEntry(startResult.Address, startResult.Value, "Write", startResult.Status, startResult.Message);
+
+            if (startResult.Status == "OK")
+                await NotifyAsync("success", "PLC", "CAD Data Sent & Axis 1 Started Successfully.");
+            else
+                await NotifyAsync("error", "PLC", "Failed to start Axis 1: " + startResult.Message);
 
         }
 
