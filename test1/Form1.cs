@@ -68,7 +68,8 @@ namespace test1
         private readonly int[] axErrorCode    = new int[4];
         private readonly int[] axWarningCode  = new int[4];
         private readonly int[] axAxisStatus   = new int[4];
-        private readonly int[] axStartNo      = new int[4];
+        private readonly int[] axCurrentDataNo = new int[4];
+        private readonly int[] axLastDataNo    = new int[4];
         private readonly int[] axErrorReset   = new int[4];
         private readonly int[] axJogSpeed     = new int[4];
         private readonly int[] axNewSpeed     = new int[4];

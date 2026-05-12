@@ -130,7 +130,6 @@ namespace test1
                 plcComm.WriteDeviceValue("M502", v);
                 UpdateIntegrityState(true);
                 AddLogEntry("M502", v.ToString(CultureInfo.InvariantCulture), "Write", "OK", "GoHome");
-                if (active) await NotifyAsync("warning", "System", "Activated GO HOME command (M502)");
             }
             catch (Exception ex)
             {
@@ -154,7 +153,6 @@ namespace test1
                 plcComm.WriteDeviceValue("M300", v);
                 UpdateIntegrityState(true);
                 AddLogEntry("M300", v.ToString(CultureInfo.InvariantCulture), "Write", "OK", "ResetError");
-                if (active) await NotifyAsync("success", "System", "Activated RESET ERROR command (M300)");
             }
             catch (Exception ex)
             {
@@ -178,7 +176,6 @@ namespace test1
                 plcComm.WriteDeviceValue("M2000", v);
                 UpdateIntegrityState(true);
                 AddLogEntry("M2000", v.ToString(CultureInfo.InvariantCulture), "Write", "OK", "Start");
-                if (active) await NotifyAsync("success", "System", "Activated START command (M2000)");
             }
             catch (Exception ex)
             {
@@ -263,13 +260,14 @@ namespace test1
                             axCurrentSpeed[i] = (speedData[1] << 16) | (speedData[0] & 0xFFFF);
 
                             // Error, warning, axis status from buffer memory
-                            int[] mon = comm.ReadBuffer(0, MonitorBaseG[i], 15);
-                            axErrorCode[i]   = mon[OffErrorCode];
-                            axWarningCode[i] = mon[OffWarningCode];
-                            axAxisStatus[i]  = mon[OffAxisStatus];
+                            int[] mon = comm.ReadBuffer(0, MonitorBaseG[i], 38);
+                            axErrorCode[i]     = mon[OffErrorCode];
+                            axWarningCode[i]   = mon[OffWarningCode];
+                            axAxisStatus[i]    = mon[OffAxisStatus];
+                            axCurrentDataNo[i] = mon[35]; // Md.44
+                            axLastDataNo[i]    = mon[37]; // Md.46
 
                             int[] ctl = comm.ReadBuffer(0, ControlBaseG[i], 20);
-                            axStartNo[i]    = ctl[OffStartNo];
                             axErrorReset[i] = ctl[OffErrorReset];
                             axNewSpeed[i]   = (ctl[OffNewSpeed + 1] << 16) | (ctl[OffNewSpeed] & 0xFFFF);
                         }

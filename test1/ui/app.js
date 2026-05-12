@@ -4,10 +4,10 @@ const state = {
   control: {
     connection: { connected: false, station: 0, banner: "PLC disconnected", meta: "MX Component logical station: 0", buttonText: "CONNECT PLC Q" },
     axes: [
-      { index: 1, currentPos: "--", currentSpeed: "--", errorCode: "--", warningCode: "--", axisStatus: "--", startNo: "--", errorReset: "--", jogSpeed: "--", newSpeed: "--" },
-      { index: 2, currentPos: "--", currentSpeed: "--", errorCode: "--", warningCode: "--", axisStatus: "--", startNo: "--", errorReset: "--", jogSpeed: "--", newSpeed: "--" },
-      { index: 3, currentPos: "--", currentSpeed: "--", errorCode: "--", warningCode: "--", axisStatus: "--", startNo: "--", errorReset: "--", jogSpeed: "--", newSpeed: "--" },
-      { index: 4, currentPos: "--", currentSpeed: "--", errorCode: "--", warningCode: "--", axisStatus: "--", startNo: "--", errorReset: "--", jogSpeed: "--", newSpeed: "--" }
+      { index: 1, currentPos: "--", currentSpeed: "--", errorCode: "--", warningCode: "--", axisStatus: "--", currentDataNo: "--", lastDataNo: "--", errorReset: "--", jogSpeed: "--", newSpeed: "--" },
+      { index: 2, currentPos: "--", currentSpeed: "--", errorCode: "--", warningCode: "--", axisStatus: "--", currentDataNo: "--", lastDataNo: "--", errorReset: "--", jogSpeed: "--", newSpeed: "--" },
+      { index: 3, currentPos: "--", currentSpeed: "--", errorCode: "--", warningCode: "--", axisStatus: "--", currentDataNo: "--", lastDataNo: "--", errorReset: "--", jogSpeed: "--", newSpeed: "--" },
+      { index: 4, currentPos: "--", currentSpeed: "--", errorCode: "--", warningCode: "--", axisStatus: "--", currentDataNo: "--", lastDataNo: "--", errorReset: "--", jogSpeed: "--", newSpeed: "--" }
     ],
     events: []
   },
@@ -147,6 +147,12 @@ function bindEvents() {
     const input = e.target; if (input.tagName === "INPUT" && input.dataset.processIndex !== undefined)
       post("setProcessRowValue", { index: parseInt(input.dataset.processIndex, 10), field: input.dataset.processField, value: input.value.trim() });
   });
+  dom.processBody.addEventListener("click", e => {
+    const tr = e.target.closest("tr");
+    if (!tr) return;
+    Array.from(dom.processBody.querySelectorAll("tr")).forEach(r => r.classList.remove("is-selected"));
+    tr.classList.add("is-selected");
+  });
 
   const addTelemetryBtn = document.getElementById("telemetry-add-btn");
   if (addTelemetryBtn) {
@@ -273,7 +279,8 @@ function renderControl() {
     { key: 'errorCode', label: 'ERROR CODE', addrKey: 'errorCodeAddr' },
     { key: 'warningCode', label: 'WARNING CODE', addrKey: 'warningCodeAddr' },
     { key: 'axisStatus', label: 'AXIS STATUS', addrKey: 'axisStatusAddr' },
-    { key: 'startNo', label: 'START NO.', addrKey: 'startNoAddr' },
+    { key: 'currentDataNo', label: 'MD.44 CURR DATA NO.', addrKey: 'currentDataNoAddr' },
+    { key: 'lastDataNo', label: 'MD.46 LAST DATA NO.', addrKey: 'lastDataNoAddr' },
 
   ];
   const grid = document.getElementById('axis-grid');
@@ -349,7 +356,7 @@ function renderPointsTable() {
 
 function renderProcessTable() {
   const rows = state.dxf.processRows || [];
-  dom.processBody.innerHTML = rows.map((r, i) => `<tr><td>${esc(r.motionType || "")}</td><td><input type="text" class="text-input compact" style="margin:0;width:100%;min-width:80px" data-process-index="${i}" data-process-field="mcode" value="${esc(r.mCodeValue || "")}"></td><td><input type="text" class="text-input compact" style="margin:0;width:100%;min-width:60px" data-process-index="${i}" data-process-field="dwell" value="${esc(r.dwell || "")}"></td><td><input type="text" class="text-input compact" style="margin:0;width:100%;min-width:60px" data-process-index="${i}" data-process-field="speed" value="${esc(r.speed || "")}"></td><td>${esc(r.endCoordinate || "")}</td><td>${esc(r.centerCoordinate || "")}</td></tr>`).join("");
+  dom.processBody.innerHTML = rows.map((r, i) => `<tr data-process-index="${i}"><td>${esc(r.motionType || "")}</td><td><input type="text" class="text-input compact" style="margin:0;width:100%;min-width:80px" data-process-index="${i}" data-process-field="mcode" value="${esc(r.mCodeValue || "")}"></td><td><input type="text" class="text-input compact" style="margin:0;width:100%;min-width:60px" data-process-index="${i}" data-process-field="dwell" value="${esc(r.dwell || "")}"></td><td><input type="text" class="text-input compact" style="margin:0;width:100%;min-width:60px" data-process-index="${i}" data-process-field="speed" value="${esc(r.speed || "")}"></td><td>${esc(r.endCoordinate || "")}</td><td>${esc(r.centerCoordinate || "")}</td></tr>`).join("");
 }
 
 function renderCadPreview() {
@@ -446,24 +453,24 @@ if (!host) {
         connection: { connected: false, station: 0, banner: "PLC disconnected", meta: "MX Component logical station: 0", buttonText: "CONNECT PLC Q" },
         axes: [
           {
-            index: 1, currentPos: "--", currentSpeed: "--", errorCode: "--", warningCode: "--", axisStatus: "--", startNo: "--", errorReset: "--", jogSpeed: "--", newSpeed: "--",
+            index: 1, currentPos: "--", currentSpeed: "--", errorCode: "--", warningCode: "--", axisStatus: "--", currentDataNo: "--", lastDataNo: "--", errorReset: "--", jogSpeed: "--", newSpeed: "--",
             currentPosAddr: "D0", currentSpeedAddr: "D4", errorCodeAddr: "U0\\G806", warningCodeAddr: "U0\\G807", axisStatusAddr: "U0\\G814",
-            startNoAddr: "U0\\G1500", errorResetAddr: "U0\\G1502", jogSpeedAddr: "D406", newSpeedAddr: "U0\\G1518"
+            currentDataNoAddr: "U0\\G835", lastDataNoAddr: "U0\\G837", errorResetAddr: "U0\\G1502", jogSpeedAddr: "D406", newSpeedAddr: "U0\\G1518"
           },
           {
-            index: 2, currentPos: "--", currentSpeed: "--", errorCode: "--", warningCode: "--", axisStatus: "--", startNo: "--", errorReset: "--", jogSpeed: "--", newSpeed: "--",
+            index: 2, currentPos: "--", currentSpeed: "--", errorCode: "--", warningCode: "--", axisStatus: "--", currentDataNo: "--", lastDataNo: "--", errorReset: "--", jogSpeed: "--", newSpeed: "--",
             currentPosAddr: "D10", currentSpeedAddr: "D14", errorCodeAddr: "U0\\G906", warningCodeAddr: "U0\\G907", axisStatusAddr: "U0\\G914",
-            startNoAddr: "U0\\G1600", errorResetAddr: "U0\\G1602", jogSpeedAddr: "D406", newSpeedAddr: "U0\\G1618"
+            currentDataNoAddr: "U0\\G935", lastDataNoAddr: "U0\\G937", errorResetAddr: "U0\\G1602", jogSpeedAddr: "D406", newSpeedAddr: "U0\\G1618"
           },
           {
-            index: 3, currentPos: "--", currentSpeed: "--", errorCode: "--", warningCode: "--", axisStatus: "--", startNo: "--", errorReset: "--", jogSpeed: "--", newSpeed: "--",
+            index: 3, currentPos: "--", currentSpeed: "--", errorCode: "--", warningCode: "--", axisStatus: "--", currentDataNo: "--", lastDataNo: "--", errorReset: "--", jogSpeed: "--", newSpeed: "--",
             currentPosAddr: "D20", currentSpeedAddr: "D24", errorCodeAddr: "U0\\G1006", warningCodeAddr: "U0\\G1007", axisStatusAddr: "U0\\G1014",
-            startNoAddr: "U0\\G1700", errorResetAddr: "U0\\G1702", jogSpeedAddr: "D406", newSpeedAddr: "U0\\G1718"
+            currentDataNoAddr: "U0\\G1035", lastDataNoAddr: "U0\\G1037", errorResetAddr: "U0\\G1702", jogSpeedAddr: "D406", newSpeedAddr: "U0\\G1718"
           },
           {
-            index: 4, currentPos: "--", currentSpeed: "--", errorCode: "--", warningCode: "--", axisStatus: "--", startNo: "--", errorReset: "--", jogSpeed: "--", newSpeed: "--",
+            index: 4, currentPos: "--", currentSpeed: "--", errorCode: "--", warningCode: "--", axisStatus: "--", currentDataNo: "--", lastDataNo: "--", errorReset: "--", jogSpeed: "--", newSpeed: "--",
             currentPosAddr: "D30", currentSpeedAddr: "D34", errorCodeAddr: "U0\\G1106", warningCodeAddr: "U0\\G1107", axisStatusAddr: "U0\\G1114",
-            startNoAddr: "U0\\G1800", errorResetAddr: "U0\\G1802", jogSpeedAddr: "D406", newSpeedAddr: "U0\\G1818"
+            currentDataNoAddr: "U0\\G1135", lastDataNoAddr: "U0\\G1137", errorResetAddr: "U0\\G1802", jogSpeedAddr: "D406", newSpeedAddr: "U0\\G1818"
           }
         ],
         events: [
