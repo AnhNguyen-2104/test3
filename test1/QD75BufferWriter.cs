@@ -403,22 +403,10 @@ namespace test1
 
                 try
                 {
-                    // Các thông số Da.1~Da.5 (Định danh), Da.10 (M-code), Da.9 (Dwell), Da.8 (Speed)
-                    // trên Trục 2 (Slave) được QD75 bỏ qua, nhưng ta ghi 0 để đảm bảo bộ nhớ đệm sạch sẽ.
-                    var rMove = Write16(plcComm, blockBase + OffsetMoveCode, 0, "Slave Identifier");
-                    result.WriteResults.Add(rMove);
-
-                    var rM = Write16(plcComm, blockBase + OffsetMCode, 0, "Slave MCode");
-                    result.WriteResults.Add(rM);
-
-                    var rD = Write16(plcComm, blockBase + OffsetDwell, 0, "Slave Dwell");
-                    result.WriteResults.Add(rD);
-
-                    var rS = Write32(plcComm, blockBase + OffsetSpeed, 0, "Slave Speed");
-                    result.WriteResults.Add(rS);
+                    // Trục 2 (Slave) chỉ quan tâm đến toạ độ đích và tâm cung tròn.
+                    // Các thông số khác (Da.1~Da.5, Da.8, Da.9) KHÔNG ĐƯỢC GHI để tránh xung đột cấu hình.
 
                     // Da.6 Positioning address (32-bit) — U0\G(8000 + (n-1)*10 + 6)
-                    // Đây là thông số BẮT BUỘC duy nhất trên trục phụ.
                     if (hasEnd)
                     {
                         var rP = Write32(plcComm, blockBase + OffsetPosX, endY, "Slave PosY");
