@@ -234,6 +234,19 @@ namespace test1
                         ? (isLastPath ? " (End)" : " (Continuous Positioning)")
                         : " (Continuous Path)";
 
+                    // Nếu đây là đối tượng đồ họa đầu tiên trong đường chạy (path), 
+                    // ta phải tạo một lệnh di chuyển đến tọa độ Start (điểm bắt đầu).
+                    if (pIdx == 0)
+                    {
+                        var startPt = prim.Points.First();
+                        result.Add(new ProcessRow
+                        {
+                            MotionType       = "Line (Continuous Path)",
+                            EndCoordinate    = string.Format(CultureInfo.InvariantCulture, "{0:0.###};{1:0.###}", startPt.X, startPt.Y),
+                            CenterCoordinate = string.Empty
+                        });
+                    }
+
                     if (prim.SourceType.Contains("Line") || prim.SourceType.Contains("Polyline"))
                     {
                         for (int i = 1; i < prim.Points.Count; i++)
