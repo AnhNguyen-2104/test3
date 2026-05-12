@@ -204,44 +204,57 @@ namespace test1
                 });
             }
 
-            // ── BƯỚC 1: Master axis (Axis 1 / X): nạp dữ liệu vào bộ đệm (G2000+) ────
-            // Tắt writeStartNo để máy KHÔNG chạy ngay lập tức.
-            var sendResult = QD75BufferWriter.WritePositioningData(plcComm, 0, dataRows, writeStartNo: false);
+            // ── Tạm dừng poll timer để tránh ContextSwitchDeadlock ──────────────────
+            // Poll timer chạy Task.Run với COM calls từ background thread.
+            // Nếu UI thread đang bận ghi batch data, COM không thể marshal
+            // từ background thread về STA thread → deadlock sau 60 giây.
+            plcPollTimer.Stop();
 
-            foreach (var wr in sendResult.WriteResults)
+            try
             {
-                AddLogEntry(wr.Address, wr.Value, "Write", wr.Status, wr.Message);
-                if (!wr.Status.StartsWith("OK"))
-                    await NotifyAsync("error", "Telemetry [Axis1]", $"{wr.Address}: {wr.Message}");
-            }
+                // ── BƯỚC 1: Master axis (Axis 1 / X): nạp dữ liệu vào bộ đệm (G2000+) ────
+                // Tắt writeStartNo để máy KHÔNG chạy ngay lập tức.
+                var sendResult = QD75BufferWriter.WritePositioningData(plcComm, 0, dataRows, writeStartNo: false);
 
-            if (!sendResult.Success)
+                foreach (var wr in sendResult.WriteResults)
+                {
+                    AddLogEntry(wr.Address, wr.Value, "Write", wr.Status, wr.Message);
+                    if (!wr.Status.StartsWith("OK"))
+                        await NotifyAsync("error", "Telemetry [Axis1]", $"{wr.Address}: {wr.Message}");
+                }
+
+                if (!sendResult.Success)
+                {
+                    await NotifyAsync("error", "Telemetry [Axis1]", "Failed to load Axis 1 buffer.");
+                    return;
+                }
+
+                // ── BƯỚC 2: Slave axis (Axis 2 / Y): nạp toạ độ vào bộ đệm (G8006+) ──────
+                var slaveResult = QD75BufferWriter.WriteSlaveAxisData(plcComm, dataRows, slaveBaseG: 8000);
+
+                foreach (var wr in slaveResult.WriteResults)
+                {
+                    AddLogEntry(wr.Address, wr.Value, "Write", wr.Status, wr.Message);
+                    if (!wr.Status.StartsWith("OK"))
+                        await NotifyAsync("error", "Telemetry [Axis2]", $"{wr.Address}: {wr.Message}");
+                }
+
+                if (!slaveResult.Success)
+                {
+                    await NotifyAsync("error", "Telemetry [Axis2]", "Failed to load Axis 2 buffer.");
+                    return;
+                }
+
+                // Không tự động ghi Start No. vào G1500 nữa.
+                // Người dùng sẽ nhấn nút "START ACTION (M2000)" trên giao diện để kích hoạt chạy máy.
+                await NotifyAsync("success", "PLC", $"CAD data loaded: {dataRows.Count} points → Axis 1 (G2000+) & Axis 2 (G8006+). Press START ACTION to run.");
+            }
+            finally
             {
-                await NotifyAsync("error", "Telemetry [Axis1]", "Failed to load Axis 1 buffer.");
-                return;
+                // ── Bật lại poll timer sau khi ghi xong (hoặc lỗi) ──────────────────
+                if (plcComm != null && plcComm.IsConnected && !isClosing)
+                    plcPollTimer.Start();
             }
-
-            // ── BƯỚC 2: Slave axis (Axis 2 / Y): nạp toạ độ vào bộ đệm (G8006+) ──────
-            var slaveResult = QD75BufferWriter.WriteSlaveAxisData(plcComm, dataRows, slaveBaseG: 8000);
-
-            foreach (var wr in slaveResult.WriteResults)
-            {
-                AddLogEntry(wr.Address, wr.Value, "Write", wr.Status, wr.Message);
-                if (!wr.Status.StartsWith("OK"))
-                    await NotifyAsync("error", "Telemetry [Axis2]", $"{wr.Address}: {wr.Message}");
-            }
-
-            if (!slaveResult.Success)
-            {
-                await NotifyAsync("error", "Telemetry [Axis2]", "Failed to load Axis 2 buffer.");
-                return;
-            }
-
-            // Không tự động ghi Start No. vào G1500 nữa.
-            // Người dùng sẽ nhấn nút "START ACTION (M2000)" trên giao diện để kích hoạt chạy máy.
-            await NotifyAsync("success", "PLC", $"CAD data loaded: {dataRows.Count} points → Axis 1 (G2000+) & Axis 2 (G8006+). Press START ACTION to run.");
-
-
         }
 
         // ── Build ProcessRow list from connected CAD paths ───────────────────────
@@ -254,8 +267,9 @@ namespace test1
 
             for (int pathIdx = 0; pathIdx < paths.Count; pathIdx++)
             {
-                var path       = paths[pathIdx];
+                var path        = paths[pathIdx];
                 bool isLastPath = (pathIdx == paths.Count - 1);
+                bool isFirstPath = (pathIdx == 0);
 
                 for (int pIdx = 0; pIdx < path.Count; pIdx++)
                 {
@@ -263,19 +277,41 @@ namespace test1
                     if (prim.Points == null || prim.Points.Count < 2) continue;
 
                     bool isLastInPath = (pIdx == path.Count - 1);
+
+                    // suffix cho điểm cuối của primitive này trong path:
+                    //   - Điểm cuối của path cuối cùng      → (End)                   [Da.1 = 00]
+                    //   - Điểm cuối của path trung gian      → (Continuous Positioning) [Da.1 = 01] dừng có tăng/giảm tốc trước khi nhảy sang path kế
+                    //   - Điểm giữa trong cùng một path      → (Continuous Path)        [Da.1 = 11] chạy không dừng
                     string suffix = isLastInPath
                         ? (isLastPath ? " (End)" : " (Continuous Positioning)")
                         : " (Continuous Path)";
 
-                    // Nếu đây là đối tượng đồ họa đầu tiên trong đường chạy (path), 
-                    // ta phải tạo một lệnh di chuyển đến tọa độ Start (điểm bắt đầu).
+                    // Nếu đây là primitive đầu tiên trong path, tạo lệnh di chuyển đến điểm Start.
+                    //
+                    // ▶ Chế độ di chuyển "lên đầu path":
+                    //   - Path đầu tiên (pathIdx=0) và chỉ có 1 path: Continuous Path (không cần dừng).
+                    //   - Path đầu tiên (pathIdx=0) nhưng có nhiều path: Continuous Positioning
+                    //     (dừng có tăng/giảm tốc tại điểm start trước khi bắt đầu gia công).
+                    //   - Path có đoạn đứt quãng (pathIdx>0): bắt buộc Continuous Positioning
+                    //     để PLC dừng, giảm tốc tại điểm start mới, tránh bị kéo qua đoạn không gia công.
+                    //
+                    // Quy tắc: chỉ dùng Continuous Path nếu đây là path đầu tiên VÀ chỉ có đúng 1 path.
                     if (pIdx == 0)
                     {
-                        var startPt = prim.Points.First();
+                        var startPt   = prim.Points.First();
+                        bool onlyPath = (paths.Count == 1);
+
+                        // Điểm nhảy sang start của path mới (đứt quãng) → phải dừng (Continuous Positioning)
+                        // Điểm start của path duy nhất → Continuous Path (chạy thẳng vào path)
+                        string startMotion = (isFirstPath && onlyPath)
+                            ? "Line (Continuous Path)"
+                            : "Line (Continuous Positioning)";
+
                         result.Add(new ProcessRow
                         {
-                            MotionType       = "Line (Continuous Path)",
-                            EndCoordinate    = string.Format(CultureInfo.InvariantCulture, "{0:0.###};{1:0.###}", startPt.X, startPt.Y),
+                            MotionType       = startMotion,
+                            EndCoordinate    = string.Format(CultureInfo.InvariantCulture,
+                                "{0:0.###};{1:0.###}", startPt.X, startPt.Y),
                             CenterCoordinate = string.Empty
                         });
                     }
