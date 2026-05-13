@@ -143,33 +143,6 @@
     </Content>
   </ItemGroup>
   <ItemGroup>
-    <COMReference Include="ActUtlDataLogging64Lib">
-      <Guid>{E27B7ABD-BDDB-4763-A886-321860281E73}</Guid>
-      <VersionMajor>5</VersionMajor>
-      <VersionMinor>0</VersionMinor>
-      <Lcid>0</Lcid>
-      <WrapperTool>tlbimp</WrapperTool>
-      <Isolated>False</Isolated>
-      <EmbedInteropTypes>True</EmbedInteropTypes>
-    </COMReference>
-    <COMReference Include="ActUtlDataLoggingLib">
-      <Guid>{B146A695-C42B-4AF7-8038-79D814139B49}</Guid>
-      <VersionMajor>1</VersionMajor>
-      <VersionMinor>0</VersionMinor>
-      <Lcid>0</Lcid>
-      <WrapperTool>tlbimp</WrapperTool>
-      <Isolated>False</Isolated>
-      <EmbedInteropTypes>True</EmbedInteropTypes>
-    </COMReference>
-    <COMReference Include="ActUtlType64Lib">
-      <Guid>{719A5FAB-EB1C-4B52-98BC-F8C9F6912D04}</Guid>
-      <VersionMajor>5</VersionMajor>
-      <VersionMinor>0</VersionMinor>
-      <Lcid>0</Lcid>
-      <WrapperTool>tlbimp</WrapperTool>
-      <Isolated>False</Isolated>
-      <EmbedInteropTypes>True</EmbedInteropTypes>
-    </COMReference>
     <COMReference Include="ActUtlTypeLib">
       <Guid>{D217E54E-4A26-4A76-B0AB-57166B90F9AF}</Guid>
       <VersionMajor>1</VersionMajor>

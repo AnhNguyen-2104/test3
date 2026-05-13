@@ -562,7 +562,7 @@ namespace test1
                     Value   = startNo.ToString(),
                     Status  = result == 0 ? "OK" : $"Error({result})",
                     Message = $"Manual Start Axis {axisIndex + 1}: {used}"
-                };
+                }; 
             }
             catch (Exception ex)
             {
