@@ -2,7 +2,7 @@ using System;
 using System.Globalization;
 using System.Threading.Tasks;
 
-namespace test1
+namespace DACDT_2026
 {
     /// <summary>
     /// Form1 — PLC control handlers: connect/disconnect, jog, go-home,

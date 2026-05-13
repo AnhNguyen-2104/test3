@@ -8,7 +8,7 @@
 // </auto-generated>
 //------------------------------------------------------------------------------
 
-namespace test1.Properties
+namespace DACDT_2026.Properties
 {
 
 

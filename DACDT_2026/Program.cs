@@ -4,7 +4,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 
-namespace test1
+namespace DACDT_2026
 {
     internal static class Program
     {

@@ -1,6 +1,6 @@
 using System;
 
-namespace test1
+namespace DACDT_2026
 {
     /// <summary>
     /// Form1 — Model classes (inner data structures).

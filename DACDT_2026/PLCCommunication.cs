@@ -3,7 +3,7 @@ using System.Globalization;
 using System.Text.RegularExpressions;
 using System.Runtime.InteropServices;
 
-namespace test1
+namespace DACDT_2026
 {
     public class PLCCommunication : IDisposable
     {

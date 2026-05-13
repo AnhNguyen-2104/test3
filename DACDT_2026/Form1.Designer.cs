@@ -1,4 +1,4 @@
-namespace test1
+namespace DACDT_2026
 {
     partial class Form1
     {
