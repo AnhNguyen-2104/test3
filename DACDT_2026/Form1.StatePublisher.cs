@@ -88,6 +88,7 @@ namespace DACDT_2026
             {
                 view     = currentView,
                 theme    = currentTheme,
+                fileKind = activeDocumentKind,
                 filePath = activeCadDocument?.FilePath ?? string.Empty,
                 fileName = activeCadDocument?.FileName ?? string.Empty,
                 bounds   = activeCadDocument == null

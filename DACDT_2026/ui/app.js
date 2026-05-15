@@ -11,7 +11,7 @@ const state = {
     ],
     events: []
   },
-  dxf: { filePath: "", fileName: "", bounds: { left: 0, top: 0, width: 100, height: 100 }, primitives: [], points: [], selectedPointKey: "", assignedPointKeys: {}, processRows: [] },
+  dxf: { fileKind: "DXF", filePath: "", fileName: "", bounds: { left: 0, top: 0, width: 100, height: 100 }, primitives: [], points: [], selectedPointKey: "", assignedPointKeys: {}, processRows: [] },
   telemetry: {}, logs: []
 };
 
@@ -324,6 +324,12 @@ function addLocalEvent(kind, title, message) {
 function renderDxf() {
   syncInputValue(dom.cadPath, state.dxf.filePath || "");
   syncInputValue(dom.cadFile, state.dxf.fileName || "");
+  const importBtn = document.getElementById("import-cad-to-process-button");
+  if (importBtn) {
+    const isGcode = (state.dxf.fileKind || "").toUpperCase() === "GCODE";
+    importBtn.disabled = isGcode;
+    importBtn.textContent = isGcode ? "G-code imported" : "Import CAD -> Process";
+  }
   const sendBtn = document.getElementById("send-cad-x-button");
   if (sendBtn) sendBtn.disabled = !(state.control && state.control.connection && state.control.connection.connected);
   renderPointsTable(); renderProcessTable(); renderCadPreview(); updateNavState();

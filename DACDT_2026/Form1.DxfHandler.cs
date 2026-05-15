@@ -44,6 +44,8 @@ namespace DACDT_2026
                     string sourceName = isGcode ? "GCODE" : "DXF";
                     AddLogEntry(sourceName, selectedPath, "Read", "Selected", "OpenFileDialog");
 
+                    ClearLoadedFileState();
+
                     if (isGcode)
                         LoadGcodeCoordinatesAsCad(selectedPath);
                     else
@@ -77,6 +79,7 @@ namespace DACDT_2026
         private void LoadCadDocument(string filePath)
         {
             activeCadDocument = cadService.Load(filePath);
+            activeDocumentKind = "DXF";
             selectedCadPointKey = activeCadDocument.Points.FirstOrDefault()?.Key;
             assignedPointKeys.Clear();
         }
@@ -84,8 +87,18 @@ namespace DACDT_2026
         private void LoadGcodeCoordinatesAsCad(string filePath)
         {
             activeCadDocument = gcodeCoordinateService.LoadAsCad(filePath);
+            activeDocumentKind = "GCODE";
             selectedCadPointKey = activeCadDocument.Points.FirstOrDefault()?.Key;
             assignedPointKeys.Clear();
+        }
+
+        private void ClearLoadedFileState()
+        {
+            activeCadDocument = null;
+            activeDocumentKind = string.Empty;
+            selectedCadPointKey = null;
+            assignedPointKeys.Clear();
+            processRows.Clear();
         }
 
         private static bool IsGcodeFile(string filePath)
@@ -288,12 +301,14 @@ namespace DACDT_2026
             if (activeCadDocument?.Primitives == null) return result;
 
             var paths = GetConnectedPathsFromCad(activeCadDocument.Primitives);
+            bool isGcodeDocument = string.Equals(activeDocumentKind, "GCODE", StringComparison.OrdinalIgnoreCase);
 
             for (int pathIdx = 0; pathIdx < paths.Count; pathIdx++)
             {
                 var path        = paths[pathIdx];
                 bool isLastPath = (pathIdx == paths.Count - 1);
                 bool isFirstPath = (pathIdx == 0);
+                bool pathClosed = IsClosedPath(path);
 
                 for (int pIdx = 0; pIdx < path.Count; pIdx++)
                 {
@@ -336,7 +351,8 @@ namespace DACDT_2026
                             MotionType       = startMotion,
                             EndCoordinate    = string.Format(CultureInfo.InvariantCulture,
                                 "{0:0.###};{1:0.###}", startPt.X, startPt.Y),
-                            CenterCoordinate = string.Empty
+                            CenterCoordinate = string.Empty,
+                            MCodeValue       = (!isGcodeDocument && pathClosed) ? "1" : string.Empty
                         });
                     }
 
@@ -347,13 +363,17 @@ namespace DACDT_2026
                             bool   isLastInPrim   = (i == prim.Points.Count - 1);
                             string currentSuffix  = (isLastInPrim && isLastInPath) ? suffix : " (Continuous Path)";
 
-                            result.Add(new ProcessRow
+                            var row = new ProcessRow
                             {
                                 MotionType       = "Line" + currentSuffix,
                                 EndCoordinate    = string.Format(CultureInfo.InvariantCulture,
                                     "{0:0.###};{1:0.###}", prim.Points[i].X, prim.Points[i].Y),
                                 CenterCoordinate = string.Empty
-                            });
+                            };
+                            ApplyPrimitiveMCode(row, prim);
+                            if (!isGcodeDocument && pathClosed && isLastInPath && isLastInPrim)
+                                row.MCodeValue = "2";
+                            result.Add(row);
                         }
                     }
                     else if (prim.SourceType.Contains("Arc") || prim.SourceType.Contains("Circle"))
@@ -371,6 +391,9 @@ namespace DACDT_2026
                         if (prim.Center != null)
                             row.CenterCoordinate = string.Format(CultureInfo.InvariantCulture,
                                 "{0:0.###};{1:0.###}", prim.Center.X, prim.Center.Y);
+                        ApplyPrimitiveMCode(row, prim);
+                        if (!isGcodeDocument && pathClosed && isLastInPath)
+                            row.MCodeValue = "2";
                         result.Add(row);
                     }
                 }
@@ -441,6 +464,23 @@ namespace DACDT_2026
             }
 
             return paths;
+        }
+
+        private bool IsClosedPath(List<CadDocumentService.CadPrimitiveData> path)
+        {
+            if (path == null || path.Count == 0) return false;
+
+            var first = path.FirstOrDefault(p => p.Points != null && p.Points.Count > 0);
+            var last = path.LastOrDefault(p => p.Points != null && p.Points.Count > 0);
+            if (first == null || last == null) return false;
+
+            return AreClose(first.Points.First(), last.Points.Last());
+        }
+
+        private static void ApplyPrimitiveMCode(ProcessRow row, CadDocumentService.CadPrimitiveData primitive)
+        {
+            if (!string.IsNullOrWhiteSpace(primitive?.MCodeValue))
+                row.MCodeValue = primitive.MCodeValue;
         }
 
         private bool AreClose(CadDocumentService.CadCoordinate a, CadDocumentService.CadCoordinate b)
