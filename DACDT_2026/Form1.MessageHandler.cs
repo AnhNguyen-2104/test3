@@ -114,7 +114,7 @@ namespace DACDT_2026
                         offsetX = GetDouble(payload, "x", offsetX);
                         offsetY = GetDouble(payload, "y", offsetY);
                         await PushDxfStateAsync();
-                        await NotifyAsync("success", "Offset", $"Offset set: X = {offsetX:0.###}, Y = {offsetY:0.###}");
+                        await HandleScanLimitsAsync();
                         break;
 
                     case "setProcessRowValue":

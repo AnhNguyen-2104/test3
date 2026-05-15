@@ -68,6 +68,9 @@ namespace DACDT_2026
 
                     // Bỏ qua nhấn Import: Tự động chạy Import ngay sau khi load xong DXF
                     await HandleImportCadToProcessAsync();
+                    
+                    // Tự động quét toạ độ kiểm tra hành trình
+                    await HandleScanLimitsAsync();
                 }
                 catch (Exception ex)
                 {
@@ -550,6 +553,89 @@ namespace DACDT_2026
 
         private ProcessRow GetProcessRow(string key)
             => processRows.FirstOrDefault(row => string.Equals(row.Key, key, StringComparison.OrdinalIgnoreCase));
+
+        // ── Scan Limits ──────────────────────────────────────────────────────────
+        /// <summary>
+        /// Quét toàn bộ toạ độ X/Y từ file DXF/G-code đang load,
+        /// so sánh với giới hạn hành trình máy:
+        ///   Trục 1 (X) = 170 mm, Trục 2 (Y) = 170 mm, Trục 3 (Z) = 50 mm.
+        /// Kết quả push lên UI dưới dạng message "scanResult".
+        /// </summary>
+        private async Task HandleScanLimitsAsync()
+        {
+            const double LimitX = 170.0;   // Trục 1 – X
+            const double LimitY = 170.0;   // Trục 2 – Y
+            const double LimitZ = 50.0;    // Trục 3 – Z (thông tin, chưa lấy từ file)
+
+            if (activeCadDocument == null)
+            {
+                await NotifyAsync("info", "Scan Limits", "Chưa load file DXF / G-code.");
+                return;
+            }
+
+            // ── Thu thập tất cả điểm từ primitives ──────────────────────────────
+            var allX = new List<double>();
+            var allY = new List<double>();
+
+            if (activeCadDocument.Primitives != null)
+            {
+                foreach (var prim in activeCadDocument.Primitives)
+                {
+                    if (prim.Points == null) continue;
+                    foreach (var pt in prim.Points)
+                    {
+                        allX.Add(pt.X);
+                        allY.Add(pt.Y);
+                    }
+                }
+            }
+
+            // Nếu primitives không có điểm thì lấy từ danh sách Points
+            if (allX.Count == 0 && activeCadDocument.Points != null)
+            {
+                foreach (var pt in activeCadDocument.Points)
+                {
+                    allX.Add(pt.X);
+                    allY.Add(pt.Y);
+                }
+            }
+
+            if (allX.Count == 0)
+            {
+                await NotifyAsync("info", "Scan Limits", "Không tìm thấy toạ độ trong file.");
+                return;
+            }
+
+            // ── Tính min / max thô (từ file) ────────────────────────────────────
+            double rawMinX = allX.Min(),   rawMaxX = allX.Max();
+            double rawMinY = allY.Min(),   rawMaxY = allY.Max();
+            double rawRangeX = rawMaxX - rawMinX;
+            double rawRangeY = rawMaxY - rawMinY;
+
+            // ── Áp dụng offset → toạ độ máy ─────────────────────────────────────
+            double adjMinX = rawMinX + offsetX,  adjMaxX = rawMaxX + offsetX;
+            double adjMinY = rawMinY + offsetY,  adjMaxY = rawMaxY + offsetY;
+            double adjRangeX = adjMaxX - adjMinX;
+            double adjRangeY = adjMaxY - adjMinY;
+
+            // ── Kiểm tra giới hạn ────────────────────────────────────────────────
+            bool xUnder  = adjMinX < 0.0;
+            bool xOver   = adjMaxX > LimitX;
+            bool yUnder  = adjMinY < 0.0;
+            bool yOver   = adjMaxY > LimitY;
+            bool xExceed = xUnder || xOver;
+            bool yExceed = yUnder || yOver;
+            bool anyExceed = xExceed || yExceed;
+
+            // Phần trăm dùng so với giới hạn (dựa trên range + vị trí)
+            double xPct = Math.Min(100.0, adjRangeX / LimitX * 100.0);
+            double yPct = Math.Min(100.0, adjRangeY / LimitY * 100.0);
+
+            string summary = anyExceed
+                ? $"VƯỢT GIỚI HẠN! X:[{adjMinX:0.###}→{adjMaxX:0.###}/{LimitX}mm]  Y:[{adjMinY:0.###}→{adjMaxY:0.###}/{LimitY}mm]"
+                : $"TRONG GIỚI HẠN – X:[{adjMinX:0.###}→{adjMaxX:0.###}/{LimitX}mm]  Y:[{adjMinY:0.###}→{adjMaxY:0.###}/{LimitY}mm]";
+            await NotifyAsync(anyExceed ? "error" : "success", "Scan Limits", summary);
+        }
 
         /// <summary>
         /// Cộng offsetX / offsetY vào chuỗi toạ độ "X;Y" trước khi gửi PLC.
