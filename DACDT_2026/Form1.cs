@@ -51,6 +51,7 @@ namespace DACDT_2026
 
         // Services
         private readonly CadDocumentService cadService = new CadDocumentService();
+        private readonly GcodeDocumentService gcodeService = new GcodeDocumentService();
 
         // Data lists
         private readonly List<MonitorRow>  monitorRows  = new List<MonitorRow>();
@@ -84,6 +85,7 @@ namespace DACDT_2026
         // CAD / DXF
         private CadDocumentService.CadLoadResult activeCadDocument;
         private string selectedCadPointKey;
+        private string activeDocumentKind = "DXF";
         private string globalZDown = "";
         private string globalZSafe = "";
         private string globalSpeed = "1000";

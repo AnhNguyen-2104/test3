@@ -18,7 +18,7 @@
           <button class="nav-link" data-view="logs">LOGS</button>
           <button class="nav-link" data-view="telemetry">TELEMETRY</button>
           <button class="nav-link" data-placeholder="SYSTEM SETTINGS">SYSTEM SETTINGS</button>
-          <button class="nav-link" data-view="dxf">DXF RUN</button>
+          <button class="nav-link" data-view="dxf">DXF/GCODE RUN</button>
         </nav>
       </div>
       <div class="top-actions">
@@ -42,7 +42,7 @@
         <button class="side-link" data-view="telemetry">TELEMETRY</button>
         <button class="side-link" data-view="logs">LOGS</button>
         <button class="side-link" data-placeholder="SETTINGS">SETTINGS</button>
-        <button class="side-link" data-view="dxf">DXF RUN</button>
+        <button class="side-link" data-view="dxf">DXF/GCODE RUN</button>
       </nav>
 
       <!-- Manual Jog in sidebar -->
@@ -205,12 +205,12 @@
       <section id="view-dxf" class="view">
         <div class="panel dxf-toolbar">
           <div class="toolbar-field toolbar-path">
-            <input id="cad-path" class="text-input compact" type="text" placeholder="CAD path" readonly>
+            <input id="cad-path" class="text-input compact" type="text" placeholder="CAD/G-code path" readonly>
           </div>
           <div class="toolbar-field toolbar-file">
             <input id="cad-file" class="text-input compact" type="text" placeholder="File name" readonly>
           </div>
-          <button id="open-dxf" class="primary-button toolbar-open compact">Open</button>
+          <button id="open-dxf" class="primary-button toolbar-open compact">Open DXF/G-code</button>
         </div>
 
         <div class="dxf-grid">

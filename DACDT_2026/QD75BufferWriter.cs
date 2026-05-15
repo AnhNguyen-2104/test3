@@ -541,10 +541,132 @@ namespace DACDT_2026
             }
         }
         /// <summary>
-        /// Manually execute a start command by writing the Start No. to the axis control register.
-        /// Useful for starting a master axis only after all slave axis data has been fully written.
+        /// Send all positioning data rows to PLC using a single bulk WriteBuffer call.
+        /// This is significantly faster than individual writes for large point sets.
         /// </summary>
-        public static WriteResult ExecuteStartNo(PLCCommunication plcComm, int axisIndex, int startNo = 1)
+        public static SendResult WritePositioningDataBulk(PLCCommunication plcComm, int axisIndex, List<PositioningDataRow> rows, bool writeStartNo = true)
+        {
+            var result = new SendResult { Success = true };
+
+            if (plcComm == null || !plcComm.IsConnected)
+            {
+                result.Success = false;
+                result.ErrorMessage = "PLC is not connected.";
+                return result;
+            }
+
+            if (rows == null || rows.Count == 0)
+            {
+                result.Success = false;
+                result.ErrorMessage = "No points to send.";
+                return result;
+            }
+
+            int baseG = ProgramBaseG[axisIndex];
+            int totalWords = rows.Count * Stride;
+            short[] bulkData = new short[totalWords];
+
+            for (int i = 0; i < rows.Count; i++)
+            {
+                var row = rows[i];
+                int blockOffset = i * Stride;
+
+                // 1. Positioning Identifier (16-bit)
+                short moveCode = BuildPositioningIdentifierWord(row.MotionType);
+                bulkData[blockOffset + OffsetMoveCode] = moveCode;
+
+                // 2. M Code (16-bit)
+                int mcodeVal = ParseInt(row.MCodeValue);
+                bulkData[blockOffset + OffsetMCode] = (short)mcodeVal;
+
+                // 3. Dwell Time (16-bit)
+                int dwellVal = ParseInt(row.Dwell);
+                bulkData[blockOffset + OffsetDwell] = (short)dwellVal;
+
+                // 4. Command Speed (32-bit -> 2 words)
+                int speedVal = ParseInt(row.Speed) * SpeedMultiplier;
+                bulkData[blockOffset + OffsetSpeed] = (short)(speedVal & 0xFFFF);
+                bulkData[blockOffset + OffsetSpeed + 1] = (short)((speedVal >> 16) & 0xFFFF);
+
+                // 5. Position X (32-bit -> 2 words)
+                int endX = 0;
+                if (TryParseCoordinateX(row.EndCoordinate, out endX))
+                {
+                    bulkData[blockOffset + OffsetPosX] = (short)(endX & 0xFFFF);
+                    bulkData[blockOffset + OffsetPosX + 1] = (short)((endX >> 16) & 0xFFFF);
+                }
+
+                // 6. Center X (32-bit -> 2 words)
+                int centerX = 0;
+                if (TryParseCoordinateX(row.CenterCoordinate, out centerX))
+                {
+                    bulkData[blockOffset + OffsetCenterX] = (short)(centerX & 0xFFFF);
+                    bulkData[blockOffset + OffsetCenterX + 1] = (short)((centerX >> 16) & 0xFFFF);
+                }
+            }
+
+            try
+            {
+                // Write entire block: U0\G(baseG) to U0\G(baseG + totalWords - 1)
+                int res = plcComm.WriteBuffer(0, baseG, bulkData);
+                if (res != 0)
+                {
+                    result.Success = false;
+                    result.ErrorMessage = $"WriteBuffer failed with error code: {res}";
+                }
+                else
+                {
+                    result.WriteResults.Add(new WriteResult
+                    {
+                        Address = $"U0\\G{baseG} to U0\\G{baseG + totalWords - 1}",
+                        Value = $"Bulk write {rows.Count} points",
+                        Status = "OK",
+                        Message = "Bulk WriteBuffer successful"
+                    });
+                }
+            }
+            catch (Exception ex)
+            {
+                result.Success = false;
+                result.ErrorMessage = ex.Message;
+            }
+
+            // Write Start No. = 1 to Control base register
+            if (writeStartNo && result.Success)
+            {
+                try
+                {
+                    string startDevice = $"U0\\G{ControlBaseG[axisIndex]}";
+                    string usedStart;
+                    int rStart = plcComm.WriteInt16ToDevicePath(startDevice, 1, out usedStart);
+                    result.WriteResults.Add(new WriteResult
+                    {
+                        Address = startDevice,
+                        Value = "1",
+                        Status = rStart == 0 ? "OK" : $"Error({rStart})",
+                        Message = "Start Axis " + (axisIndex + 1) + ": " + usedStart
+                    });
+                }
+                catch (Exception ex)
+                {
+                    result.WriteResults.Add(new WriteResult
+                    {
+                        Address = $"U0\\G{ControlBaseG[axisIndex]}",
+                        Value = "1",
+                        Status = "Error",
+                        Message = ex.Message
+                    });
+                    result.Success = false;
+                }
+            }
+
+            return result;
+        }
+
+        /// <summary>
+        /// Manual start axis
+        /// </summary>
+        public static WriteResult StartAxis(PLCCommunication plcComm, int axisIndex, int startNo)
         {
             if (plcComm == null || !plcComm.IsConnected)
             {
@@ -568,6 +690,83 @@ namespace DACDT_2026
             {
                 return new WriteResult { Address = $"U0\\G{ControlBaseG[axisIndex]}", Status = "Error", Message = ex.Message };
             }
+        }
+
+        /// <summary>
+        /// Cấu trúc dữ liệu cho một điểm định vị (Point) của module QD75/LD75.
+        /// C# sẽ tự động gộp các cấu hình rời rạc này thành chuẩn 10 Word của QD75.
+        /// </summary>
+        public class PositioningPoint
+        {
+            // Cấu hình (Sẽ được C# tự động gộp bit vào Offset 0)
+            public short OperationPattern { get; set; }   // Da.1 (VD: 0, 1, 3)
+            public short ControlSystem { get; set; }      // Da.2 (VD: 10, 15, 16)
+            public short AccelerationTimeNo { get; set; } // Da.3 (0-3)
+            public short DecelerationTimeNo { get; set; } // Da.4 (0-3)
+            public short PartnerAxis { get; set; }        // Da.5 (Trục nội suy: 0=Trục 1, 1=Trục 2...)
+
+            // Các thông số rời
+            public short MCode { get; set; }              // Offset 1
+            public short DwellTime { get; set; }          // Offset 2
+            
+            // Dữ liệu 32-bit (Bố trí chuẩn xác theo QD75 Manual)
+            public int CommandSpeed { get; set; }         // Offset 4 & 5 (Tốc độ)
+            public int PositioningAddress { get; set; }   // Offset 6 & 7 (Toạ độ)
+            public int ArcAddress { get; set; }           // Offset 8 & 9 (Tâm cung tròn)
+        }
+
+        /// <summary>
+        /// Hàm gộp (batch) dữ liệu và ghi cùng lúc xuống Buffer Memory.
+        /// Đã fix: Tự động gộp Da.1 -> Da.5 vào Offset 0 và mapping đúng cấu trúc QD75.
+        /// </summary>
+        public static int WritePoints(PLCCommunication plcComm, int startIO, int startPointNo, List<PositioningPoint> points)
+        {
+            if (plcComm == null || !plcComm.IsConnected) return -1;
+            if (points == null || points.Count == 0) return -1;
+
+            int totalWords = points.Count * 10;
+            short[] sData = new short[totalWords];
+
+            for (int i = 0; i < points.Count; i++)
+            {
+                int baseIndex = i * 10;
+                PositioningPoint pt = points[i];
+
+                // 1. Tự động gộp Da.1 đến Da.5 vào Offset 0 theo chuẩn QD75
+                int da1 = pt.OperationPattern & 0x03;
+                int da5 = pt.PartnerAxis & 0x03;
+                int da3 = pt.AccelerationTimeNo & 0x03;
+                int da4 = pt.DecelerationTimeNo & 0x03;
+                int da2 = pt.ControlSystem & 0xFF;
+                sData[baseIndex + 0] = (short)(da1 | (da5 << 2) | (da3 << 4) | (da4 << 6) | (da2 << 8));
+                
+                // 2. Offset 1: M Code
+                sData[baseIndex + 1] = pt.MCode;
+                
+                // 3. Offset 2: Dwell Time
+                sData[baseIndex + 2] = pt.DwellTime;
+                
+                // 4. Offset 3: Dự phòng (thường là 0)
+                sData[baseIndex + 3] = 0;
+
+                // 5. Offset 4 & 5: Command Speed (Da.8)
+                sData[baseIndex + 4] = (short)(pt.CommandSpeed & 0xFFFF);
+                sData[baseIndex + 5] = (short)((pt.CommandSpeed >> 16) & 0xFFFF);
+
+                // 6. Offset 6 & 7: Positioning Address (Da.6)
+                sData[baseIndex + 6] = (short)(pt.PositioningAddress & 0xFFFF);
+                sData[baseIndex + 7] = (short)((pt.PositioningAddress >> 16) & 0xFFFF);
+
+                // 7. Offset 8 & 9: Arc Address (Da.7)
+                sData[baseIndex + 8] = (short)(pt.ArcAddress & 0xFFFF);
+                sData[baseIndex + 9] = (short)((pt.ArcAddress >> 16) & 0xFFFF);
+            }
+
+            // Địa chỉ Buffer Memory cho điểm số n bắt đầu từ 2000
+            int iAddress = 2000 + (startPointNo - 1) * 10;
+
+            // Ghi xuống PLC
+            return plcComm.WriteBuffer(startIO, iAddress, sData);
         }
     }
 }

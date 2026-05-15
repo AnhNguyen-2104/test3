@@ -24,8 +24,8 @@ namespace DACDT_2026
         {
             using (var dialog = new OpenFileDialog())
             {
-                dialog.Filter        = "DXF files (*.dxf)|*.dxf|All files (*.*)|*.*";
-                dialog.Title         = "Open DXF file";
+                dialog.Filter        = "CAD and G-code (*.dxf;*.gcode;*.g;*.gc;*.nc;*.ngc;*.cnc;*.tap)|*.dxf;*.gcode;*.g;*.gc;*.nc;*.ngc;*.cnc;*.tap|DXF files (*.dxf)|*.dxf|G-code files (*.gcode;*.g;*.gc;*.nc;*.ngc;*.cnc;*.tap)|*.gcode;*.g;*.gc;*.nc;*.ngc;*.cnc;*.tap|All files (*.*)|*.*";
+                dialog.Title         = "Open DXF or G-code file";
                 dialog.CheckFileExists = true;
                 dialog.Multiselect   = false;
                 dialog.RestoreDirectory = true;
@@ -40,31 +40,59 @@ namespace DACDT_2026
                 try
                 {
                     string selectedPath = Path.GetFullPath(dialog.FileName);
-                    AddLogEntry("DXF", selectedPath, "Read", "Selected", "OpenFileDialog");
+                    string extension = Path.GetExtension(selectedPath).ToLowerInvariant();
+                    bool isGcode = IsGcodeFileExtension(extension);
+                    string logTag = isGcode ? "GCODE" : "DXF";
+                    AddLogEntry(logTag, selectedPath, "Read", "Selected", "OpenFileDialog");
 
-                    LoadCadDocument(selectedPath);
-
-                    if (activeCadDocument?.Primitives != null)
-                    {
-                        var paths = GetConnectedPathsFromCad(activeCadDocument.Primitives);
-                        activeCadDocument.Primitives.Clear();
-                        foreach (var path in paths)
-                            activeCadDocument.Primitives.AddRange(path);
-                    }
-
+                    ClearLoadedFileState();
                     currentView = "dxf";
                     await PushDxfStateAsync();
-                    AddLogEntry("DXF", activeCadDocument?.FilePath ?? selectedPath, "Read", "OK",
-                        $"Loaded file: {activeCadDocument?.FileName ?? Path.GetFileName(selectedPath)}");
-                    await NotifyAsync("success", "DXF",
-                        $"Loaded: {activeCadDocument?.FileName ?? Path.GetFileName(selectedPath)}");
+
+                    if (isGcode)
+                    {
+                        var gcodeResult = LoadGcodeDocument(selectedPath);
+                        currentView = "dxf";
+                        await PushDxfStateAsync();
+                        AddLogEntry("GCODE", activeCadDocument?.FilePath ?? selectedPath, "Read", "OK",
+                            $"Loaded {gcodeResult.MovementCount} motion commands from {activeCadDocument?.FileName ?? Path.GetFileName(selectedPath)}");
+                        await NotifyAsync("success", "G-code",
+                            $"Loaded {gcodeResult.MovementCount} motion commands from {activeCadDocument?.FileName ?? Path.GetFileName(selectedPath)}");
+
+                        if (gcodeResult.Warnings != null && gcodeResult.Warnings.Count > 0)
+                        {
+                            AddLogEntry("GCODE", selectedPath, "Read", "Warning",
+                                string.Join("; ", gcodeResult.Warnings.Take(5)));
+                            await NotifyAsync("info", "G-code",
+                                $"{gcodeResult.Warnings.Count} line(s) were skipped or need checking. See Logs for details.");
+                        }
+                    }
+                    else
+                    {
+                        LoadCadDocument(selectedPath);
+
+                        if (activeCadDocument?.Primitives != null)
+                        {
+                            var paths = GetConnectedPathsFromCad(activeCadDocument.Primitives);
+                            activeCadDocument.Primitives.Clear();
+                            foreach (var path in paths)
+                                activeCadDocument.Primitives.AddRange(path);
+                        }
+
+                        currentView = "dxf";
+                        await PushDxfStateAsync();
+                        AddLogEntry("DXF", activeCadDocument?.FilePath ?? selectedPath, "Read", "OK",
+                            $"Loaded file: {activeCadDocument?.FileName ?? Path.GetFileName(selectedPath)}");
+                        await NotifyAsync("success", "DXF",
+                            $"Loaded: {activeCadDocument?.FileName ?? Path.GetFileName(selectedPath)}");
 
                     // Bỏ qua nhấn Import: Tự động chạy Import ngay sau khi load xong DXF
-                    await HandleImportCadToProcessAsync();
+                        await HandleImportCadToProcessAsync();
+                    }
                 }
                 catch (Exception ex)
                 {
-                    await NotifyAsync("error", "DXF", ex.Message);
+                    await NotifyAsync("error", "Open file", ex.Message);
                 }
             }
         }
@@ -72,9 +100,53 @@ namespace DACDT_2026
         private void LoadCadDocument(string filePath)
         {
             activeCadDocument = cadService.Load(filePath);
+            activeDocumentKind = "DXF";
             selectedCadPointKey = activeCadDocument.Points.FirstOrDefault()?.Key;
             assignedPointKeys.Clear();
         }
+
+        private void ClearLoadedFileState()
+        {
+            activeCadDocument = null;
+            activeDocumentKind = string.Empty;
+            selectedCadPointKey = null;
+            assignedPointKeys.Clear();
+            processRows.Clear();
+        }
+
+        private GcodeDocumentService.GcodeLoadResult LoadGcodeDocument(string filePath)
+        {
+            var result = gcodeService.Load(filePath, globalSpeed);
+            activeCadDocument = result.CadDocument;
+            activeDocumentKind = "GCODE";
+            selectedCadPointKey = activeCadDocument.Points.FirstOrDefault()?.Key;
+            assignedPointKeys.Clear();
+
+            processRows.Clear();
+            foreach (var row in result.ProcessRows)
+            {
+                processRows.Add(new ProcessRow
+                {
+                    MotionType = row.MotionType,
+                    MCodeValue = row.MCodeValue,
+                    Dwell = row.Dwell,
+                    Speed = row.Speed,
+                    EndCoordinate = row.EndCoordinate,
+                    CenterCoordinate = row.CenterCoordinate
+                });
+            }
+
+            return result;
+        }
+
+        private static bool IsGcodeFileExtension(string extension)
+            => string.Equals(extension, ".gcode", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(extension, ".g", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(extension, ".gc", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(extension, ".nc", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(extension, ".ngc", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(extension, ".cnc", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(extension, ".tap", StringComparison.OrdinalIgnoreCase);
 
         // ── Assign Point ─────────────────────────────────────────────────────────
         private async Task HandleAssignPointAsync(string slot, string pointKey)
@@ -127,6 +199,12 @@ namespace DACDT_2026
         // ── Import CAD → Process table ───────────────────────────────────────────
         private async Task HandleImportCadToProcessAsync()
         {
+            if (string.Equals(activeDocumentKind, "GCODE", StringComparison.OrdinalIgnoreCase))
+            {
+                await NotifyAsync("info", "G-code", "G-code is already loaded into the process table.");
+                return;
+            }
+
             if (activeCadDocument?.Primitives == null || activeCadDocument.Primitives.Count == 0)
             {
                 await NotifyAsync("info", "DXF", "No CAD data available.");
@@ -214,7 +292,7 @@ namespace DACDT_2026
             {
                 // ── BƯỚC 1: Master axis (Axis 1 / X): nạp dữ liệu vào bộ đệm (G2000+) ────
                 // Tắt writeStartNo để máy KHÔNG chạy ngay lập tức.
-                var sendResult = QD75BufferWriter.WritePositioningData(plcComm, 0, dataRows, writeStartNo: false);
+                var sendResult = QD75BufferWriter.WritePositioningDataBulk(plcComm, 0, dataRows, writeStartNo: false);
 
                 foreach (var wr in sendResult.WriteResults)
                 {
