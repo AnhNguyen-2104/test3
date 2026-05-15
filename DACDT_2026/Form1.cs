@@ -89,6 +89,8 @@ namespace DACDT_2026
         private string globalZDown = "";
         private string globalZSafe = "";
         private string globalSpeed = "1000";
+        private double offsetX = 0.0;
+        private double offsetY = 0.0;
 
         // UI state
         private volatile bool webReady;

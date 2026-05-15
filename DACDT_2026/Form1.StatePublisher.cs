@@ -91,6 +91,8 @@ namespace DACDT_2026
                 fileKind = activeDocumentKind,
                 filePath = activeCadDocument?.FilePath ?? string.Empty,
                 fileName = activeCadDocument?.FileName ?? string.Empty,
+                offsetX,
+                offsetY,
                 bounds   = activeCadDocument == null
                     ? (object)new { left = 0.0, top = 0.0, right = 100.0, bottom = 100.0, width = 100.0, height = 100.0 }
                     : new
@@ -103,7 +105,7 @@ namespace DACDT_2026
                         height = activeCadDocument.Bounds.Height
                     },
                 primitives = activeCadDocument == null
-                    ? new List<object>()
+                    ? new System.Collections.Generic.List<object>()
                     : activeCadDocument.Primitives.Select(p => (object)new
                     {
                         sourceType = p.SourceType,
@@ -113,7 +115,7 @@ namespace DACDT_2026
                         isCircle   = p.IsCircle
                     }).ToList(),
                 points = activeCadDocument == null
-                    ? new List<object>()
+                    ? new System.Collections.Generic.List<object>()
                     : activeCadDocument.Points.Select(pt => (object)new
                     {
                         index    = pt.Index,
@@ -126,19 +128,50 @@ namespace DACDT_2026
                     }).ToList(),
                 selectedPointKey  = selectedCadPointKey ?? string.Empty,
                 assignedPointKeys,
-                processRows = processRows.Select(row => new
+                processRows = processRows.Select(row =>
                 {
-                    key              = row.Key,
-                    motionType       = row.MotionType,
-                    mCodeValue       = row.MCodeValue       ?? string.Empty,
-                    dwell            = row.Dwell            ?? string.Empty,
-                    speed            = row.Speed            ?? string.Empty,
-                    endCoordinate    = row.EndCoordinate    ?? string.Empty,
-                    centerCoordinate = row.CenterCoordinate ?? string.Empty
+                    // Parse raw end coordinate and apply offset for display
+                    string endWithOffset    = ApplyOffsetToCoord(row.EndCoordinate,    offsetX, offsetY);
+                    string centerWithOffset = ApplyOffsetToCoord(row.CenterCoordinate, offsetX, offsetY);
+                    return new
+                    {
+                        key              = row.Key,
+                        motionType       = row.MotionType,
+                        mCodeValue       = row.MCodeValue       ?? string.Empty,
+                        dwell            = row.Dwell            ?? string.Empty,
+                        speed            = row.Speed            ?? string.Empty,
+                        endCoordinate    = row.EndCoordinate    ?? string.Empty,
+                        centerCoordinate = row.CenterCoordinate ?? string.Empty,
+                        endCoordinateDisplay    = endWithOffset,
+                        centerCoordinateDisplay = centerWithOffset
+                    };
                 }).ToList()
             };
 
             return PostToUiAsync("dxfState", payload);
+        }
+
+        /// <summary>
+        /// Cộng offsetX / offsetY vào chuỗi toạ độ định dạng "X;Y".
+        /// Trả về chuỗi gốc nếu không parse được.
+        /// </summary>
+        private static string ApplyOffsetToCoord(string coord, double ox, double oy)
+        {
+            if (string.IsNullOrWhiteSpace(coord)) return string.Empty;
+
+            string[] parts = coord.Split(';');
+            if (parts.Length < 2) return coord;
+
+            double x, y;
+            if (!double.TryParse(parts[0].Trim(), System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture, out x))
+                return coord;
+            if (!double.TryParse(parts[1].Trim(), System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture, out y))
+                return coord;
+
+            return string.Format(System.Globalization.CultureInfo.InvariantCulture,
+                "{0:0.###};{1:0.###}", x + ox, y + oy);
         }
 
         // ── Telemetry state ──────────────────────────────────────────────────────

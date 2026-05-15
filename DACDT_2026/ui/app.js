@@ -69,6 +69,9 @@ function cacheDom() {
   dom.modalInput = document.getElementById("modal-input");
   dom.modalConfirm = document.getElementById("modal-confirm");
   dom.modalCancel = document.getElementById("modal-cancel");
+  dom.offsetXInput = document.getElementById("offset-x-input");
+  dom.offsetYInput = document.getElementById("offset-y-input");
+  dom.applyOffsetBtn = document.getElementById("apply-offset-btn");
 }
 
 function bindEvents() {
@@ -212,6 +215,13 @@ function bindEvents() {
     if (!state.control || !state.control.connection || !state.control.connection.connected) { showToast("error", "Telemetry", "Chưa kết nối PLC."); return; }
     post("sendCadX");
   });
+  if (dom.applyOffsetBtn) {
+    dom.applyOffsetBtn.addEventListener("click", () => {
+      const x = parseFloat(dom.offsetXInput ? dom.offsetXInput.value : 0) || 0;
+      const y = parseFloat(dom.offsetYInput ? dom.offsetYInput.value : 0) || 0;
+      post("setOffset", { x, y });
+    });
+  }
   if (dom.clearLogsButton) dom.clearLogsButton.addEventListener("click", () => post("clearLogs"));
   if (dom.telemetryWatchBtn) {
     dom.telemetryWatchBtn.addEventListener("click", () => {
@@ -324,6 +334,9 @@ function addLocalEvent(kind, title, message) {
 function renderDxf() {
   syncInputValue(dom.cadPath, state.dxf.filePath || "");
   syncInputValue(dom.cadFile, state.dxf.fileName || "");
+  // Sync offset inputs from backend state
+  if (dom.offsetXInput) syncInputValue(dom.offsetXInput, state.dxf.offsetX != null ? String(state.dxf.offsetX) : "0");
+  if (dom.offsetYInput) syncInputValue(dom.offsetYInput, state.dxf.offsetY != null ? String(state.dxf.offsetY) : "0");
   const importBtn = document.getElementById("import-cad-to-process-button");
   if (importBtn) {
     const isGcode = (state.dxf.fileKind || "").toUpperCase() === "GCODE";
@@ -362,7 +375,16 @@ function renderPointsTable() {
 
 function renderProcessTable() {
   const rows = state.dxf.processRows || [];
-  dom.processBody.innerHTML = rows.map((r, i) => `<tr data-process-index="${i}"><td>${esc(r.motionType || "")}</td><td><input type="text" class="text-input compact" style="margin:0;width:100%;min-width:80px" data-process-index="${i}" data-process-field="mcode" value="${esc(r.mCodeValue || "")}"></td><td><input type="text" class="text-input compact" style="margin:0;width:100%;min-width:60px" data-process-index="${i}" data-process-field="dwell" value="${esc(r.dwell || "")}"></td><td><input type="text" class="text-input compact" style="margin:0;width:100%;min-width:60px" data-process-index="${i}" data-process-field="speed" value="${esc(r.speed || "")}"></td><td>${esc(r.endCoordinate || "")}</td><td>${esc(r.centerCoordinate || "")}</td></tr>`).join("");
+  const hasOffset = rows.some(r => r.endCoordinateDisplay && r.endCoordinateDisplay !== r.endCoordinate);
+  dom.processBody.innerHTML = rows.map((r, i) => {
+    const endDisp   = r.endCoordinateDisplay   || r.endCoordinate   || "";
+    const centDisp  = r.centerCoordinateDisplay || r.centerCoordinate || "";
+    const endRaw    = r.endCoordinate    || "";
+    const centRaw   = r.centerCoordinate || "";
+    const offClass  = (endDisp !== endRaw && endRaw !== "") ? " style='color:var(--accent-2,#a78bfa);font-weight:600'" : "";
+    const offCClass = (centDisp !== centRaw && centRaw !== "") ? " style='color:var(--accent-2,#a78bfa);font-weight:600'" : "";
+    return `<tr data-process-index="${i}"><td>${esc(r.motionType || "")}</td><td><input type="text" class="text-input compact" style="margin:0;width:100%;min-width:80px" data-process-index="${i}" data-process-field="mcode" value="${esc(r.mCodeValue || "")}"></td><td><input type="text" class="text-input compact" style="margin:0;width:100%;min-width:60px" data-process-index="${i}" data-process-field="dwell" value="${esc(r.dwell || "")}"></td><td><input type="text" class="text-input compact" style="margin:0;width:100%;min-width:60px" data-process-index="${i}" data-process-field="speed" value="${esc(r.speed || "")}"></td><td>${esc(endRaw)}</td><td>${esc(centRaw)}</td><td${offClass}>${esc(endDisp)}</td><td${offCClass}>${esc(centDisp)}</td></tr>`;
+  }).join("");
 }
 
 function renderCadPreview() {

@@ -226,7 +226,7 @@ namespace DACDT_2026
                 return;
             }
 
-            // Map ProcessRow → QD75BufferWriter.PositioningDataRow
+            // Map ProcessRow → QD75BufferWriter.PositioningDataRow (tọa độ đã cộng offset)
             var dataRows = new List<QD75BufferWriter.PositioningDataRow>();
             foreach (var row in processRows)
             {
@@ -236,8 +236,8 @@ namespace DACDT_2026
                     MCodeValue       = row.MCodeValue,
                     Dwell            = row.Dwell,
                     Speed            = row.Speed,
-                    EndCoordinate    = row.EndCoordinate,
-                    CenterCoordinate = row.CenterCoordinate
+                    EndCoordinate    = ApplyOffsetToCoordSend(row.EndCoordinate,    offsetX, offsetY),
+                    CenterCoordinate = ApplyOffsetToCoordSend(row.CenterCoordinate, offsetX, offsetY)
                 });
             }
 
@@ -550,5 +550,31 @@ namespace DACDT_2026
 
         private ProcessRow GetProcessRow(string key)
             => processRows.FirstOrDefault(row => string.Equals(row.Key, key, StringComparison.OrdinalIgnoreCase));
+
+        /// <summary>
+        /// Cộng offsetX / offsetY vào chuỗi toạ độ "X;Y" trước khi gửi PLC.
+        /// Nếu chuỗi rỗng hoặc offset = 0 thì trả về giá trị gốc.
+        /// </summary>
+        private static string ApplyOffsetToCoordSend(string coord, double ox, double oy)
+        {
+            if (string.IsNullOrWhiteSpace(coord)) return coord ?? string.Empty;
+            if (Math.Abs(ox) < 1e-9 && Math.Abs(oy) < 1e-9) return coord;
+
+            string[] parts = coord.Split(';');
+            if (parts.Length < 2) return coord;
+
+            double x, y;
+            if (!double.TryParse(parts[0].Trim(),
+                    System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture, out x))
+                return coord;
+            if (!double.TryParse(parts[1].Trim(),
+                    System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture, out y))
+                return coord;
+
+            return string.Format(System.Globalization.CultureInfo.InvariantCulture,
+                "{0:0.###};{1:0.###}", x + ox, y + oy);
+        }
     }
 }

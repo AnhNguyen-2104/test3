@@ -110,6 +110,13 @@ namespace DACDT_2026
                             GetString(payload, "value"));
                         break;
 
+                    case "setOffset":
+                        offsetX = GetDouble(payload, "x", offsetX);
+                        offsetY = GetDouble(payload, "y", offsetY);
+                        await PushDxfStateAsync();
+                        await NotifyAsync("success", "Offset", $"Offset set: X = {offsetX:0.###}, Y = {offsetY:0.###}");
+                        break;
+
                     case "setProcessRowValue":
                         await HandleProcessRowValueAsync(
                             GetInt(payload, "index", -1),

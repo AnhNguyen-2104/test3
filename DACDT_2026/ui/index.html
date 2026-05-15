@@ -211,6 +211,19 @@
             <input id="cad-file" class="text-input compact" type="text" placeholder="File name" readonly>
           </div>
           <button id="open-dxf" class="primary-button toolbar-open compact">Open DXF/G-code</button>
+          <!-- Offset X / Y -->
+          <div class="toolbar-field" style="display:flex;align-items:center;gap:4px;">
+            <label style="font-size:11px;color:var(--muted);white-space:nowrap;">Offset X</label>
+            <input id="offset-x-input" class="text-input compact" type="number" value="0" step="0.001"
+              style="width:90px;" title="Offset cộng vào toạ độ X trước khi gửi PLC">
+          </div>
+          <div class="toolbar-field" style="display:flex;align-items:center;gap:4px;">
+            <label style="font-size:11px;color:var(--muted);white-space:nowrap;">Offset Y</label>
+            <input id="offset-y-input" class="text-input compact" type="number" value="0" step="0.001"
+              style="width:90px;" title="Offset cộng vào toạ độ Y trước khi gửi PLC">
+          </div>
+          <button id="apply-offset-btn" class="primary-button compact"
+            style="background:var(--accent-2,#a78bfa);color:#fff;">Apply Offset</button>
         </div>
 
         <div class="dxf-grid">
@@ -270,6 +283,8 @@
                     <th>Speed</th>
                     <th>End coord (X;Y)</th>
                     <th>Center coord (X;Y)</th>
+                    <th style="color:var(--accent-2,#a78bfa);">End + Offset</th>
+                    <th style="color:var(--accent-2,#a78bfa);">Center + Offset</th>
                   </tr>
                 </thead>
                 <tbody id="process-table-body"></tbody>
