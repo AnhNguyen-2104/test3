@@ -133,12 +133,19 @@ function bindEvents() {
   let gcodeTimeout;
   if (saveGcodeBtn && gcodeTa) {
     saveGcodeBtn.addEventListener("click", () => {
-      post("saveGcode", { text: gcodeTa.value });
+      post("saveGcode", { text: gcodeTa.value.toUpperCase() });
     });
-    gcodeTa.addEventListener("input", () => {
+    gcodeTa.addEventListener("input", function() {
+      const start = this.selectionStart;
+      const end = this.selectionEnd;
+      const upper = this.value.toUpperCase();
+      if (this.value !== upper) {
+        this.value = upper;
+        this.setSelectionRange(start, end);
+      }
       clearTimeout(gcodeTimeout);
       gcodeTimeout = setTimeout(() => {
-        post("previewGcode", { text: gcodeTa.value });
+        post("previewGcode", { text: this.value });
       }, 400);
     });
   }
@@ -279,6 +286,9 @@ function handleHostMessage(msg) {
     case "notify":
       showToast(msg.payload.kind, msg.payload.title, msg.payload.message);
       addLocalEvent(msg.payload.kind, msg.payload.title, msg.payload.message);
+      break;
+    case "log":
+      addLocalEvent("info", msg.payload.title, msg.payload.message);
       break;
   }
 }
@@ -509,9 +519,7 @@ function closePrompt() { modalSubmit = null; dom.modal.classList.add("hidden"); 
 function submitPrompt() { if (typeof modalSubmit === "function") modalSubmit(dom.modalInput.value.trim()); closePrompt(); }
 
 function showToast(kind, title, message) {
-  const t = document.createElement("div"); t.className = `toast ${kind || "info"}`;
-  t.innerHTML = `<div class="toast-title">${esc(title || "Message")}</div><div class="toast-message">${esc(message || "")}</div>`;
-  dom.toastContainer.appendChild(t); setTimeout(() => t.remove(), 4200);
+  // User requested to completely remove popups, everything is logged to System Events instead.
 }
 
 function post(action, payload = {}) { if (host) host.postMessage({ action, payload }); }

@@ -161,7 +161,25 @@ namespace DACDT_2026
                     string path = activeCadDocument.FilePath;
                     if (string.IsNullOrEmpty(path) || path == "Untitled")
                     {
-                        path = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "New_GCode_" + DateTime.Now.ToString("yyyyMMdd_HHmmss") + ".gcode");
+                        string selectedPath = null;
+                        this.Invoke(new Action(() =>
+                        {
+                            using (var sfd = new SaveFileDialog())
+                            {
+                                sfd.Filter = "G-code files (*.gcode;*.nc;*.txt)|*.gcode;*.nc;*.txt|All files (*.*)|*.*";
+                                sfd.Title = "Save New G-code";
+                                sfd.FileName = "New_GCode_" + DateTime.Now.ToString("yyyyMMdd_HHmmss") + ".gcode";
+                                if (sfd.ShowDialog() == DialogResult.OK)
+                                {
+                                    selectedPath = sfd.FileName;
+                                }
+                            }
+                        }));
+
+                        if (string.IsNullOrEmpty(selectedPath))
+                            return; // User cancelled
+
+                        path = selectedPath;
                         activeCadDocument.FilePath = path;
                         activeCadDocument.FileName = Path.GetFileName(path);
                     }
@@ -284,7 +302,7 @@ namespace DACDT_2026
             processRows.AddRange(rows);
 
             await PushDxfStateAsync();
-            await NotifyAsync("success", "DXF", $"Compiled {rows.Count} movement commands into the process table.");
+            await LogUIAsync("DXF", $"Compiled {rows.Count} movement commands into the process table.");
         }
 
         // ── Send CAD X axis data to PLC ──────────────────────────────────────────
@@ -711,7 +729,10 @@ namespace DACDT_2026
             string summary = anyExceed
                 ? $"VƯỢT GIỚI HẠN! X:[{adjMinX:0.###}→{adjMaxX:0.###}/{LimitX}mm]  Y:[{adjMinY:0.###}→{adjMaxY:0.###}/{LimitY}mm]"
                 : $"TRONG GIỚI HẠN – X:[{adjMinX:0.###}→{adjMaxX:0.###}/{LimitX}mm]  Y:[{adjMinY:0.###}→{adjMaxY:0.###}/{LimitY}mm]";
-            await NotifyAsync(anyExceed ? "error" : "success", "Scan Limits", summary);
+            if (anyExceed)
+                await NotifyAsync("error", "Scan Limits", summary);
+            else
+                await LogUIAsync("Scan Limits", summary);
         }
 
         /// <summary>

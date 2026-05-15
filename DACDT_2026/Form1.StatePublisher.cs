@@ -239,8 +239,11 @@ namespace DACDT_2026
         }
 
         // ── Notify ───────────────────────────────────────────────────────────────
-        private Task NotifyAsync(string kind, string title, string message)
+        protected Task NotifyAsync(string kind, string title, string message)
             => PostToUiAsync("notify", new { kind, title, message });
+
+        protected Task LogUIAsync(string title, string message)
+            => PostToUiAsync("log", new { title, message });
 
         // ── Log helpers ───────────────────────────────────────────────────────────
         private void AddLogEntry(string address, string value,
