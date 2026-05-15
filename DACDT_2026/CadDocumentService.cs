@@ -229,6 +229,7 @@ namespace DACDT_2026
             public CadCoordinate Center { get; set; }
             public bool IsCw { get; set; }
             public bool IsCircle { get; set; }
+            public string MCodeValue { get; set; }
         }
 
         public sealed class CadPointData

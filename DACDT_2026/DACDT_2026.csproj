@@ -101,6 +101,7 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="CadDocumentService.cs" />
+    <Compile Include="GcodeCoordinateService.cs" />
     <Compile Include="GcodeDocumentService.cs" />
     <Compile Include="Form1.cs">
       <SubType>Form</SubType>

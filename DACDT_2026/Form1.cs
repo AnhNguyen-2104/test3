@@ -50,7 +50,8 @@ namespace DACDT_2026
         };
 
         // Services
-        private readonly CadDocumentService cadService = new CadDocumentService();
+        private readonly CadDocumentService       cadService             = new CadDocumentService();
+        private readonly GcodeCoordinateService   gcodeCoordinateService = new GcodeCoordinateService();
 
         // Data lists
         private readonly List<MonitorRow>  monitorRows  = new List<MonitorRow>();
