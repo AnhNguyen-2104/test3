@@ -53,6 +53,12 @@
     <Prefer32Bit>true</Prefer32Bit>
   </PropertyGroup>
   <ItemGroup>
+    <Reference Include="Gcode.Utils, Version=0.2.0.9, Culture=neutral, processorArchitecture=MSIL">
+      <HintPath>..\packages\Gcode.Utils.0.2.9\lib\netstandard2.0\Gcode.Utils.dll</HintPath>
+    </Reference>
+    <Reference Include="LibBase, Version=1.0.4.0, Culture=neutral, processorArchitecture=MSIL">
+      <HintPath>..\packages\LibBase.1.0.4\lib\netstandard2.0\LibBase.dll</HintPath>
+    </Reference>
     <Reference Include="Microsoft.Web.WebView2.Core">
       <HintPath>..\packages\Microsoft.Web.WebView2.1.0.3912.50\lib\net462\Microsoft.Web.WebView2.Core.dll</HintPath>
       <Private>True</Private>
@@ -79,6 +85,7 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="CadDocumentService.cs" />
+    <Compile Include="GcodeCoordinateService.cs" />
     <Compile Include="Form1.cs">
       <SubType>Form</SubType>
     </Compile>

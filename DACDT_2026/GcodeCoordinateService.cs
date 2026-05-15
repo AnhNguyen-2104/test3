@@ -1,0 +1,461 @@
+using System;
+using System.Collections.Generic;
+using System.Globalization;
+using System.IO;
+using System.Linq;
+using System.Text;
+using Gcode.Utils;
+using Gcode.Utils.Entity;
+
+namespace DACDT_2026
+{
+    public sealed class GcodeCoordinateService
+    {
+        private const double Epsilon = 0.000001;
+
+        public CadDocumentService.CadLoadResult LoadAsCad(string filePath)
+        {
+            if (string.IsNullOrWhiteSpace(filePath))
+                throw new ArgumentException("G-code path is empty.", nameof(filePath));
+
+            string fullPath = Path.GetFullPath(filePath);
+            ParseResult parsed = ReadGcode(fullPath);
+
+            return new CadDocumentService.CadLoadResult
+            {
+                FilePath = fullPath,
+                DirectoryPath = Path.GetDirectoryName(fullPath) ?? string.Empty,
+                FileName = Path.GetFileName(fullPath),
+                Bounds = BuildBounds(parsed.Primitives, parsed.Points),
+                Primitives = parsed.Primitives,
+                Points = BuildPointRows(parsed.Points)
+            };
+        }
+
+        private static ParseResult ReadGcode(string filePath)
+        {
+            var result = new ParseResult();
+            double currentX = 0.0;
+            double currentY = 0.0;
+            double unitScale = 1.0;
+            bool absoluteMode = true;
+            bool hasCurrentPoint = false;
+            int modalMotion = 1;
+
+            foreach (string rawLine in File.ReadLines(filePath))
+            {
+                string normalized = NormalizeLine(rawLine);
+                if (string.IsNullOrWhiteSpace(normalized))
+                    continue;
+
+                GcodeCommandFrame frame;
+                try
+                {
+                    frame = GcodeParser.ToGCode(normalized);
+                }
+                catch
+                {
+                    continue;
+                }
+
+                if (frame == null)
+                    continue;
+
+                if (frame.G.HasValue)
+                {
+                    if (frame.G.Value == 20)
+                    {
+                        unitScale = 25.4;
+                        continue;
+                    }
+
+                    if (frame.G.Value == 21)
+                    {
+                        unitScale = 1.0;
+                        continue;
+                    }
+
+                    if (frame.G.Value == 90)
+                    {
+                        absoluteMode = true;
+                        continue;
+                    }
+
+                    if (frame.G.Value == 91)
+                    {
+                        absoluteMode = false;
+                        continue;
+                    }
+
+                    if (frame.G.Value >= 0 && frame.G.Value <= 3)
+                        modalMotion = frame.G.Value;
+                }
+
+                int motion = frame.G.HasValue && frame.G.Value >= 0 && frame.G.Value <= 3
+                    ? frame.G.Value
+                    : modalMotion;
+
+                bool hasCoordinate = frame.X.HasValue || frame.Y.HasValue;
+                bool isArc = motion == 2 || motion == 3;
+                bool hasArcCenterData = frame.I.HasValue || frame.J.HasValue || frame.R.HasValue;
+
+                if (!hasCoordinate && !(isArc && hasArcCenterData))
+                    continue;
+
+                double nextX = ResolveAxis(frame.X, currentX, unitScale, absoluteMode);
+                double nextY = ResolveAxis(frame.Y, currentY, unitScale, absoluteMode);
+                var nextPoint = new CadDocumentService.CadCoordinate(nextX, nextY);
+
+                if (!hasCurrentPoint)
+                {
+                    currentX = nextX;
+                    currentY = nextY;
+                    hasCurrentPoint = true;
+                    AddPoint(result.Points, nextPoint);
+                    continue;
+                }
+
+                var startPoint = new CadDocumentService.CadCoordinate(currentX, currentY);
+
+                if (isArc)
+                    AddArcPrimitive(result, frame, startPoint, nextPoint, motion == 2, unitScale);
+                else if (!AreClose(startPoint, nextPoint))
+                    AddLinePrimitive(result, startPoint, nextPoint);
+
+                currentX = nextX;
+                currentY = nextY;
+            }
+
+            return result;
+        }
+
+        private static void AddLinePrimitive(
+            ParseResult result,
+            CadDocumentService.CadCoordinate start,
+            CadDocumentService.CadCoordinate end)
+        {
+            result.Primitives.Add(new CadDocumentService.CadPrimitiveData
+            {
+                SourceType = "Line",
+                Points = new List<CadDocumentService.CadCoordinate>
+                {
+                    new CadDocumentService.CadCoordinate(start.X, start.Y),
+                    new CadDocumentService.CadCoordinate(end.X, end.Y)
+                },
+                Center = null,
+                IsCw = false,
+                IsCircle = false
+            });
+
+            AddPoint(result.Points, start);
+            AddPoint(result.Points, end);
+        }
+
+        private static void AddArcPrimitive(
+            ParseResult result,
+            GcodeCommandFrame frame,
+            CadDocumentService.CadCoordinate start,
+            CadDocumentService.CadCoordinate end,
+            bool isCw,
+            double unitScale)
+        {
+            double centerX;
+            double centerY;
+            if (!TryGetArcCenter(frame, start.X, start.Y, end.X, end.Y, unitScale, isCw, out centerX, out centerY))
+                return;
+
+            var center = new CadDocumentService.CadCoordinate(centerX, centerY);
+            List<CadDocumentService.CadCoordinate> arcPoints =
+                SampleArc(start.X, start.Y, end.X, end.Y, centerX, centerY, isCw);
+
+            result.Primitives.Add(new CadDocumentService.CadPrimitiveData
+            {
+                SourceType = "Arc",
+                Points = arcPoints,
+                Center = center,
+                IsCw = isCw,
+                IsCircle = AreClose(start, end)
+            });
+
+            AddPoint(result.Points, start);
+            AddPoint(result.Points, end);
+        }
+
+        private static bool TryGetArcCenter(
+            GcodeCommandFrame frame,
+            double startX,
+            double startY,
+            double endX,
+            double endY,
+            double unitScale,
+            bool isCw,
+            out double centerX,
+            out double centerY)
+        {
+            if (frame.I.HasValue || frame.J.HasValue)
+            {
+                centerX = startX + (frame.I ?? 0.0) * unitScale;
+                centerY = startY + (frame.J ?? 0.0) * unitScale;
+                return true;
+            }
+
+            if (frame.R.HasValue)
+                return TryGetCenterFromRadius(startX, startY, endX, endY, frame.R.Value * unitScale, isCw, out centerX, out centerY);
+
+            centerX = 0.0;
+            centerY = 0.0;
+            return false;
+        }
+
+        private static bool TryGetCenterFromRadius(
+            double startX,
+            double startY,
+            double endX,
+            double endY,
+            double radiusValue,
+            bool isCw,
+            out double centerX,
+            out double centerY)
+        {
+            double radius = Math.Abs(radiusValue);
+            double dx = endX - startX;
+            double dy = endY - startY;
+            double chord = Math.Sqrt(dx * dx + dy * dy);
+
+            if (radius < Epsilon || chord < Epsilon || chord > radius * 2.0 + Epsilon)
+            {
+                centerX = 0.0;
+                centerY = 0.0;
+                return false;
+            }
+
+            double midX = (startX + endX) / 2.0;
+            double midY = (startY + endY) / 2.0;
+            double height = Math.Sqrt(Math.Max(0.0, radius * radius - chord * chord / 4.0));
+            double ux = -dy / chord;
+            double uy = dx / chord;
+
+            double c1x = midX + ux * height;
+            double c1y = midY + uy * height;
+            double c2x = midX - ux * height;
+            double c2y = midY - uy * height;
+            bool wantMajorArc = radiusValue < 0.0;
+            bool c1IsMajorArc = GetArcSweep(startX, startY, endX, endY, c1x, c1y, isCw) > Math.PI + Epsilon;
+
+            if (c1IsMajorArc == wantMajorArc)
+            {
+                centerX = c1x;
+                centerY = c1y;
+            }
+            else
+            {
+                centerX = c2x;
+                centerY = c2y;
+            }
+
+            return true;
+        }
+
+        private static List<CadDocumentService.CadCoordinate> SampleArc(
+            double startX,
+            double startY,
+            double endX,
+            double endY,
+            double centerX,
+            double centerY,
+            bool isCw)
+        {
+            double startAngle = Math.Atan2(startY - centerY, startX - centerX);
+            double endAngle = Math.Atan2(endY - centerY, endX - centerX);
+            double sweep = isCw
+                ? NormalizePositiveRadians(startAngle - endAngle)
+                : NormalizePositiveRadians(endAngle - startAngle);
+
+            if (sweep < Epsilon)
+                sweep = Math.PI * 2.0;
+
+            double radius = Math.Sqrt((startX - centerX) * (startX - centerX) + (startY - centerY) * (startY - centerY));
+            int steps = Math.Max(12, (int)Math.Ceiling(sweep / (Math.PI / 18.0)));
+            var points = new List<CadDocumentService.CadCoordinate>();
+
+            for (int i = 0; i <= steps; i++)
+            {
+                double angle = isCw
+                    ? startAngle - sweep * i / steps
+                    : startAngle + sweep * i / steps;
+                points.Add(new CadDocumentService.CadCoordinate(
+                    centerX + radius * Math.Cos(angle),
+                    centerY + radius * Math.Sin(angle)));
+            }
+
+            return points;
+        }
+
+        private static double GetArcSweep(
+            double startX,
+            double startY,
+            double endX,
+            double endY,
+            double centerX,
+            double centerY,
+            bool isCw)
+        {
+            double startAngle = Math.Atan2(startY - centerY, startX - centerX);
+            double endAngle = Math.Atan2(endY - centerY, endX - centerX);
+            return isCw
+                ? NormalizePositiveRadians(startAngle - endAngle)
+                : NormalizePositiveRadians(endAngle - startAngle);
+        }
+
+        private static double NormalizePositiveRadians(double value)
+        {
+            double full = Math.PI * 2.0;
+            while (value < 0.0) value += full;
+            while (value >= full) value -= full;
+            return value;
+        }
+
+        private static List<CadDocumentService.CadPointData> BuildPointRows(
+            List<CadDocumentService.CadCoordinate> points)
+        {
+            var rows = new List<CadDocumentService.CadPointData>();
+            var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var point in points)
+            {
+                string key = MakePointKey(point.X, point.Y);
+                if (!seen.Add(key))
+                    continue;
+
+                rows.Add(new CadDocumentService.CadPointData
+                {
+                    Index = rows.Count + 1,
+                    LineType = "G-code point",
+                    X = point.X,
+                    Y = point.Y,
+                    XDisplay = FormatNumber(point.X),
+                    YDisplay = FormatNumber(point.Y),
+                    Key = key
+                });
+            }
+
+            return rows;
+        }
+
+        private static CadDocumentService.CadBounds BuildBounds(
+            List<CadDocumentService.CadPrimitiveData> primitives,
+            List<CadDocumentService.CadCoordinate> points)
+        {
+            var allPoints = new List<CadDocumentService.CadCoordinate>();
+            foreach (var primitive in primitives)
+            {
+                if (primitive.Points != null)
+                    allPoints.AddRange(primitive.Points);
+            }
+            allPoints.AddRange(points);
+
+            if (allPoints.Count == 0)
+            {
+                return new CadDocumentService.CadBounds
+                {
+                    Left = 0.0,
+                    Top = 0.0,
+                    Right = 100.0,
+                    Bottom = 100.0,
+                    Width = 100.0,
+                    Height = 100.0
+                };
+            }
+
+            double left = allPoints.Min(p => p.X);
+            double top = allPoints.Min(p => p.Y);
+            double right = allPoints.Max(p => p.X);
+            double bottom = allPoints.Max(p => p.Y);
+
+            return new CadDocumentService.CadBounds
+            {
+                Left = left,
+                Top = top,
+                Right = right,
+                Bottom = bottom,
+                Width = Math.Max(right - left, 1.0),
+                Height = Math.Max(bottom - top, 1.0)
+            };
+        }
+
+        private static double ResolveAxis(double? value, double current, double unitScale, bool absoluteMode)
+        {
+            if (!value.HasValue)
+                return current;
+
+            double scaled = value.Value * unitScale;
+            return absoluteMode ? scaled : current + scaled;
+        }
+
+        private static void AddPoint(List<CadDocumentService.CadCoordinate> points, CadDocumentService.CadCoordinate point)
+        {
+            if (points.Count == 0 || !AreClose(points[points.Count - 1], point))
+                points.Add(new CadDocumentService.CadCoordinate(point.X, point.Y));
+        }
+
+        private static string NormalizeLine(string rawLine)
+        {
+            if (string.IsNullOrWhiteSpace(rawLine))
+                return string.Empty;
+
+            string line = rawLine;
+            int checksumIndex = line.IndexOf('*');
+            if (checksumIndex >= 0)
+                line = line.Substring(0, checksumIndex);
+
+            return StripParentheses(line).Trim();
+        }
+
+        private static string StripParentheses(string value)
+        {
+            var builder = new StringBuilder(value.Length);
+            int depth = 0;
+
+            foreach (char ch in value)
+            {
+                if (ch == '(')
+                {
+                    depth++;
+                    continue;
+                }
+
+                if (ch == ')' && depth > 0)
+                {
+                    depth--;
+                    continue;
+                }
+
+                if (depth == 0)
+                    builder.Append(ch);
+            }
+
+            return builder.ToString();
+        }
+
+        private static bool AreClose(
+            CadDocumentService.CadCoordinate first,
+            CadDocumentService.CadCoordinate second)
+            => Math.Abs(first.X - second.X) < Epsilon
+                && Math.Abs(first.Y - second.Y) < Epsilon;
+
+        private static string MakePointKey(double x, double y)
+            => string.Format(CultureInfo.InvariantCulture, "{0:0.###}|{1:0.###}", x, y);
+
+        private static string FormatNumber(double value)
+            => value.ToString("0.###", CultureInfo.InvariantCulture);
+
+        private sealed class ParseResult
+        {
+            public List<CadDocumentService.CadPrimitiveData> Primitives { get; } =
+                new List<CadDocumentService.CadPrimitiveData>();
+
+            public List<CadDocumentService.CadCoordinate> Points { get; } =
+                new List<CadDocumentService.CadCoordinate>();
+        }
+    }
+}

@@ -24,8 +24,8 @@ namespace DACDT_2026
         {
             using (var dialog = new OpenFileDialog())
             {
-                dialog.Filter        = "DXF files (*.dxf)|*.dxf|All files (*.*)|*.*";
-                dialog.Title         = "Open DXF file";
+                dialog.Filter        = "CAD / G-code files (*.dxf;*.gcode;*.g;*.gc;*.nc;*.ngc;*.cnc;*.tap)|*.dxf;*.gcode;*.g;*.gc;*.nc;*.ngc;*.cnc;*.tap|DXF files (*.dxf)|*.dxf|G-code files (*.gcode;*.g;*.gc;*.nc;*.ngc;*.cnc;*.tap)|*.gcode;*.g;*.gc;*.nc;*.ngc;*.cnc;*.tap|All files (*.*)|*.*";
+                dialog.Title         = "Open DXF or G-code file";
                 dialog.CheckFileExists = true;
                 dialog.Multiselect   = false;
                 dialog.RestoreDirectory = true;
@@ -40,9 +40,14 @@ namespace DACDT_2026
                 try
                 {
                     string selectedPath = Path.GetFullPath(dialog.FileName);
-                    AddLogEntry("DXF", selectedPath, "Read", "Selected", "OpenFileDialog");
+                    bool isGcode = IsGcodeFile(selectedPath);
+                    string sourceName = isGcode ? "GCODE" : "DXF";
+                    AddLogEntry(sourceName, selectedPath, "Read", "Selected", "OpenFileDialog");
 
-                    LoadCadDocument(selectedPath);
+                    if (isGcode)
+                        LoadGcodeCoordinatesAsCad(selectedPath);
+                    else
+                        LoadCadDocument(selectedPath);
 
                     if (activeCadDocument?.Primitives != null)
                     {
@@ -54,9 +59,9 @@ namespace DACDT_2026
 
                     currentView = "dxf";
                     await PushDxfStateAsync();
-                    AddLogEntry("DXF", activeCadDocument?.FilePath ?? selectedPath, "Read", "OK",
+                    AddLogEntry(sourceName, activeCadDocument?.FilePath ?? selectedPath, "Read", "OK",
                         $"Loaded file: {activeCadDocument?.FileName ?? Path.GetFileName(selectedPath)}");
-                    await NotifyAsync("success", "DXF",
+                    await NotifyAsync("success", sourceName,
                         $"Loaded: {activeCadDocument?.FileName ?? Path.GetFileName(selectedPath)}");
 
                     // Bỏ qua nhấn Import: Tự động chạy Import ngay sau khi load xong DXF
@@ -64,7 +69,7 @@ namespace DACDT_2026
                 }
                 catch (Exception ex)
                 {
-                    await NotifyAsync("error", "DXF", ex.Message);
+                    await NotifyAsync("error", "DXF/G-code", ex.Message);
                 }
             }
         }
@@ -74,6 +79,25 @@ namespace DACDT_2026
             activeCadDocument = cadService.Load(filePath);
             selectedCadPointKey = activeCadDocument.Points.FirstOrDefault()?.Key;
             assignedPointKeys.Clear();
+        }
+
+        private void LoadGcodeCoordinatesAsCad(string filePath)
+        {
+            activeCadDocument = gcodeCoordinateService.LoadAsCad(filePath);
+            selectedCadPointKey = activeCadDocument.Points.FirstOrDefault()?.Key;
+            assignedPointKeys.Clear();
+        }
+
+        private static bool IsGcodeFile(string filePath)
+        {
+            string extension = Path.GetExtension(filePath);
+            return string.Equals(extension, ".gcode", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(extension, ".g", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(extension, ".gc", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(extension, ".nc", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(extension, ".ngc", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(extension, ".cnc", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(extension, ".tap", StringComparison.OrdinalIgnoreCase);
         }
 
         // ── Assign Point ─────────────────────────────────────────────────────────
