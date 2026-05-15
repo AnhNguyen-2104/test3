@@ -114,6 +114,7 @@ namespace DACDT_2026
                     ? frame.G.Value
                     : modalMotion;
 
+                double? currentF = frame.F.HasValue ? frame.F.Value : (double?)null;
                 if (frame.F.HasValue) modalF = frame.F.Value;
                 if (frame.M.HasValue) modalM = frame.M.Value;
 
@@ -143,9 +144,9 @@ namespace DACDT_2026
                 var startPoint = new CadDocumentService.CadCoordinate(currentX, currentY, currentZ);
 
                 if (isArc)
-                    AddArcPrimitive(result, frame, startPoint, nextPoint, motion == 2, unitScale, modalF, modalM, frame.P);
+                    AddArcPrimitive(result, frame, startPoint, nextPoint, motion == 2, unitScale, currentF, modalM, frame.P);
                 else if (!AreClose(startPoint, nextPoint))
-                    AddLinePrimitive(result, startPoint, nextPoint, modalF, modalM, frame.P);
+                    AddLinePrimitive(result, startPoint, nextPoint, currentF, modalM, frame.P);
 
                 currentX = nextX;
                 currentY = nextY;

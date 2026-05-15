@@ -99,6 +99,10 @@ namespace DACDT_2026
             activeDocumentKind = "GCODE";
             selectedCadPointKey = activeCadDocument.Points.FirstOrDefault()?.Key;
             assignedPointKeys.Clear();
+
+            var firstSpeed = activeCadDocument.Primitives?.FirstOrDefault(p => !string.IsNullOrEmpty(p.Speed))?.Speed;
+            if (!string.IsNullOrEmpty(firstSpeed))
+                globalSpeed = firstSpeed;
         }
 
         private void ClearLoadedFileState()
@@ -121,6 +125,10 @@ namespace DACDT_2026
                     if (string.IsNullOrEmpty(path)) path = null;
                     activeCadDocument = gcodeCoordinateService.LoadAsCadFromText(text, path);
                     
+                    var firstSpeed = activeCadDocument.Primitives?.FirstOrDefault(p => !string.IsNullOrEmpty(p.Speed))?.Speed;
+                    if (!string.IsNullOrEmpty(firstSpeed))
+                        globalSpeed = firstSpeed;
+
                     if (activeCadDocument?.Primitives != null)
                     {
                         var paths = GetConnectedPathsFromCad(activeCadDocument.Primitives);
@@ -293,8 +301,8 @@ namespace DACDT_2026
                 if (glueEndCoord != null && string.Equals(row.EndCoordinate, glueEndCoord))
                     row.MCodeValue = "2";
 
-                // Lấy giá trị speed mặc định từ ô mới
-                if (string.IsNullOrEmpty(row.Speed))
+                // Lấy giá trị speed mặc định từ ô mới (chỉ áp dụng cho DXF)
+                if (string.IsNullOrEmpty(row.Speed) && activeDocumentKind != "GCODE")
                     row.Speed = globalSpeed;
             }
 
@@ -322,8 +330,16 @@ namespace DACDT_2026
 
             // Map ProcessRow → QD75BufferWriter.PositioningDataRow (tọa độ đã cộng offset)
             var dataRows = new List<QD75BufferWriter.PositioningDataRow>();
+            string lastSpeed = globalSpeed; // fallback to globalSpeed if no F at all
+
             foreach (var row in processRows)
             {
+                if (!string.IsNullOrEmpty(row.Speed))
+                {
+                    if (int.TryParse(row.Speed, out int s) && s > 0)
+                        lastSpeed = row.Speed;
+                }
+
                 dataRows.Add(new QD75BufferWriter.PositioningDataRow
                 {
                     MotionType       = row.MotionType,
