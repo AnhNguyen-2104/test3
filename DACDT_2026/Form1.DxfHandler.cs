@@ -47,9 +47,15 @@ namespace DACDT_2026
                     ClearLoadedFileState();
 
                     if (isGcode)
+                    {
+                        rawGcodeText = File.ReadAllText(selectedPath);
                         LoadGcodeCoordinatesAsCad(selectedPath);
+                    }
                     else
+                    {
+                        rawGcodeText = string.Empty;
                         LoadCadDocument(selectedPath);
+                    }
 
                     if (activeCadDocument?.Primitives != null)
                     {
@@ -101,7 +107,37 @@ namespace DACDT_2026
             activeDocumentKind = string.Empty;
             selectedCadPointKey = null;
             assignedPointKeys.Clear();
-            processRows.Clear();
+            rawGcodeText = string.Empty;
+        }
+
+        private async Task HandleSaveGcodeAsync(string text)
+        {
+            if (activeDocumentKind == "GCODE" && activeCadDocument != null)
+            {
+                try
+                {
+                    File.WriteAllText(activeCadDocument.FilePath, text);
+                    rawGcodeText = text;
+                    LoadGcodeCoordinatesAsCad(activeCadDocument.FilePath);
+                    
+                    if (activeCadDocument?.Primitives != null)
+                    {
+                        var paths = GetConnectedPathsFromCad(activeCadDocument.Primitives);
+                        activeCadDocument.Primitives.Clear();
+                        foreach (var path in paths)
+                            activeCadDocument.Primitives.AddRange(path);
+                    }
+
+                    await PushDxfStateAsync();
+                    await HandleImportCadToProcessAsync();
+                    await HandleScanLimitsAsync();
+                    await NotifyAsync("success", "G-code", "Lưu G-code thành công và đã áp dụng.");
+                }
+                catch(Exception ex)
+                {
+                    await NotifyAsync("error", "G-code", "Lỗi khi lưu G-code: " + ex.Message);
+                }
+            }
         }
 
         private static bool IsGcodeFile(string filePath)

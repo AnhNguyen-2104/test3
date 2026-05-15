@@ -127,20 +127,28 @@ function bindEvents() {
     btn.addEventListener("pointerleave", stop);
     btn.addEventListener("pointercancel", stop);
   });
-
   dom.openDxf.addEventListener("click", () => post("openDxf"));
+  const saveGcodeBtn = document.getElementById("save-gcode-btn");
+  if (saveGcodeBtn) {
+    saveGcodeBtn.addEventListener("click", () => {
+      const ta = document.getElementById("gcode-textarea");
+      if (ta) post("saveGcode", { text: ta.value });
+    });
+  }
+  const setSpeedBtn = document.getElementById("set-speed-btn");
+  if (setSpeedBtn) {
+    setSpeedBtn.addEventListener("click", () => {
+      const spdInput = document.getElementById("global-speed-input");
+      if (spdInput) {
+        post("setProcessValue", { key: "speed", value: spdInput.value });
+      }
+    });
+  }
+
   dom.assignButtons.forEach(b => b.addEventListener("click", () => {
     if (!state.dxf.selectedPointKey) { showToast("info", "DXF", "Please select a point before assigning."); return; }
     post("assignPoint", { slot: b.dataset.assignSlot, key: state.dxf.selectedPointKey });
   }));
-  dom.processButtons.forEach(b => b.addEventListener("click", () => {
-    const key = b.dataset.processKey;
-    const row = state.dxf.processRows.find(i => i.key === key);
-    const cv = key === "speed" ? (row ? row.speed : "") : (row ? row.mCodeValue : "");
-    const tm = { zDown: "Z down height", zSafe: "Z safe height", speed: "Speed" };
-    openPrompt(tm[key] || "Input", "Enter value:", cv || "", v => post("setProcessValue", { key, value: v }));
-  }));
-  dom.runButtons.forEach(b => b.addEventListener("click", () => post("runAction", { command: b.dataset.runAction })));
   dom.pointsBody.addEventListener("click", e => {
     const row = e.target.closest("[data-point-key]"); if (!row) return;
     state.dxf.selectedPointKey = row.dataset.pointKey; renderPointsTable(); renderCadPreview();
@@ -334,9 +342,12 @@ function addLocalEvent(kind, title, message) {
 function renderDxf() {
   syncInputValue(dom.cadPath, state.dxf.filePath || "");
   syncInputValue(dom.cadFile, state.dxf.fileName || "");
-  // Sync offset inputs from backend state
+  // Sync offset and speed inputs from backend state
   if (dom.offsetXInput) syncInputValue(dom.offsetXInput, state.dxf.offsetX != null ? String(state.dxf.offsetX) : "0");
   if (dom.offsetYInput) syncInputValue(dom.offsetYInput, state.dxf.offsetY != null ? String(state.dxf.offsetY) : "0");
+  const speedInput = document.getElementById("global-speed-input");
+  if (speedInput && state.dxf.globalSpeed) syncInputValue(speedInput, state.dxf.globalSpeed);
+
   const importBtn = document.getElementById("import-cad-to-process-button");
   if (importBtn) {
     const isGcode = (state.dxf.fileKind || "").toUpperCase() === "GCODE";
@@ -344,7 +355,29 @@ function renderDxf() {
     importBtn.textContent = isGcode ? "G-code imported" : "Import CAD -> Process";
   }
   const sendBtn = document.getElementById("send-cad-x-button");
-  if (sendBtn) sendBtn.disabled = !(state.control && state.control.connection && state.control.connection.connected);
+  if (sendBtn) {
+    sendBtn.disabled = !(state.control && state.control.connection && state.control.connection.connected);
+    // Remove old listeners to avoid duplicates, although here we can just assign an onclick
+    sendBtn.onclick = () => post("sendCadX");
+  }
+  
+  const isGcode = (state.dxf.fileKind || "").toUpperCase() === "GCODE";
+  const dxfContainer = document.getElementById("dxf-points-container");
+  const gcodeContainer = document.getElementById("gcode-editor-container");
+  const gcodeTextarea = document.getElementById("gcode-textarea");
+
+  if (isGcode) {
+    if (dxfContainer) dxfContainer.style.display = "none";
+    if (gcodeContainer) gcodeContainer.style.display = "flex";
+    if (gcodeTextarea && gcodeTextarea._lastRaw !== state.dxf.rawText) {
+      gcodeTextarea.value = state.dxf.rawText || "";
+      gcodeTextarea._lastRaw = state.dxf.rawText;
+    }
+  } else {
+    if (dxfContainer) dxfContainer.style.display = "block";
+    if (gcodeContainer) gcodeContainer.style.display = "none";
+  }
+
   renderPointsTable(); renderProcessTable(); renderCadPreview(); updateNavState();
 }
 

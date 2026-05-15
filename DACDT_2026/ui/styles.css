@@ -329,8 +329,8 @@ html.theme-light .sidebar { background: #f6f8fd; }
   border-radius: 4px; border: 1px solid var(--border);
   overflow: auto; background: rgba(255,255,255,0.02);
 }
-.table-frame.tall { max-height: 290px; overflow: auto; }
-.table-frame.short { max-height: 300px; overflow: auto; }
+.table-frame.tall { flex: 1; overflow: auto; min-height: 0; }
+.table-frame.short { flex: 1; overflow: auto; min-height: 0; }
 
 .data-table { width: 100%; border-collapse: collapse; }
 .data-table th, .data-table td {
@@ -386,17 +386,19 @@ html.theme-light .data-table th { background: rgba(239, 244, 255, 0.98); }
 .dxf-grid {
   display: grid;
   grid-template-columns: minmax(600px, 1fr) 520px;
+  grid-template-rows: 1fr 1fr;
   grid-template-areas:
     "preview points"
     "preview process";
-  gap: 16px; align-items: start;
+  gap: 16px; align-items: stretch;
+  height: calc(100vh - 175px);
 }
-.panel-preview { grid-area: preview; }
-.panel-points { grid-area: points; }
-.panel-process { grid-area: process; }
+.panel-preview { grid-area: preview; display: flex; flex-direction: column; }
+.panel-points { grid-area: points; display: flex; flex-direction: column; min-height: 0; }
+.panel-process { grid-area: process; display: flex; flex-direction: column; min-height: 0; }
 
 .preview-frame {
-  position: relative; height: 610px;
+  position: relative; flex: 1; min-height: 200px;
   border-radius: var(--radius-md); overflow: hidden;
   background: #000; cursor: grab;
 }
@@ -407,8 +409,8 @@ html.theme-light .data-table th { background: rgba(239, 244, 255, 0.98); }
   color: rgba(255,255,255,0.85); font-size: 42px; pointer-events: none;
 }
 
-.dxf-actions { display: flex; flex-direction: column; gap: 12px; margin-top: 16px; }
-.action-row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+.dxf-actions { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; flex-shrink: 0; }
+.action-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 
 /* ─── Toasts ─── */
 .toast-container {
@@ -468,7 +470,9 @@ html.theme-light .data-table th { background: rgba(239, 244, 255, 0.98); }
   .axis-grid { grid-template-columns: repeat(2, 1fr); }
   .dxf-grid {
     grid-template-columns: 1fr;
+    grid-template-rows: auto auto auto;
     grid-template-areas: "preview" "points" "process";
+    height: auto;
   }
 }
 

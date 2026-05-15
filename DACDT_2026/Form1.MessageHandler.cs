@@ -128,6 +128,10 @@ namespace DACDT_2026
                         await HandleImportCadToProcessAsync();
                         break;
 
+                    case "saveGcode":
+                        await HandleSaveGcodeAsync(GetString(payload, "text"));
+                        break;
+
                     case "runAction":
                         await NotifyAsync("info", "DXF RUN", "Các nút Resume, Pause, Start đã có UI HTML.");
                         break;

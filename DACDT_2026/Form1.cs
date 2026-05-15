@@ -91,6 +91,7 @@ namespace DACDT_2026
         private string globalSpeed = "1000";
         private double offsetX = 0.0;
         private double offsetY = 0.0;
+        private string rawGcodeText = string.Empty;
 
         // UI state
         private volatile bool webReady;

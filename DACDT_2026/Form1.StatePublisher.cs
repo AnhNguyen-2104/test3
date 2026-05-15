@@ -91,6 +91,8 @@ namespace DACDT_2026
                 fileKind = activeDocumentKind,
                 filePath = activeCadDocument?.FilePath ?? string.Empty,
                 fileName = activeCadDocument?.FileName ?? string.Empty,
+                rawText  = activeDocumentKind == "GCODE" ? rawGcodeText : string.Empty,
+                globalSpeed,
                 offsetX,
                 offsetY,
                 bounds   = activeCadDocument == null
