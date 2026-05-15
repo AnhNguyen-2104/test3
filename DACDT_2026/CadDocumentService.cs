@@ -230,6 +230,8 @@ namespace DACDT_2026
             public bool IsCw { get; set; }
             public bool IsCircle { get; set; }
             public string MCodeValue { get; set; }
+            public string Speed { get; set; }
+            public string Dwell { get; set; }
         }
 
         public sealed class CadPointData
@@ -249,14 +251,16 @@ namespace DACDT_2026
             {
             }
 
-            public CadCoordinate(double x, double y)
+            public CadCoordinate(double x, double y, double z = 0.0)
             {
                 X = x;
                 Y = y;
+                Z = z;
             }
 
             public double X { get; set; }
             public double Y { get; set; }
+            public double Z { get; set; }
         }
 
         private sealed class CadExtractionContext

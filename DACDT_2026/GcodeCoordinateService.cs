@@ -37,10 +37,13 @@ namespace DACDT_2026
             var result = new ParseResult();
             double currentX = 0.0;
             double currentY = 0.0;
+            double currentZ = 0.0;
             double unitScale = 1.0;
             bool absoluteMode = true;
             bool hasCurrentPoint = false;
             int modalMotion = 1;
+            double? modalF = null;
+            int? modalM = null;
 
             foreach (string rawLine in File.ReadLines(filePath))
             {
@@ -95,35 +98,42 @@ namespace DACDT_2026
                     ? frame.G.Value
                     : modalMotion;
 
-                bool hasCoordinate = frame.X.HasValue || frame.Y.HasValue;
+                if (frame.F.HasValue) modalF = frame.F.Value;
+                if (frame.M.HasValue) modalM = frame.M.Value;
+
+                bool hasCoordinate = frame.X.HasValue || frame.Y.HasValue || frame.Z.HasValue;
                 bool isArc = motion == 2 || motion == 3;
                 bool hasArcCenterData = frame.I.HasValue || frame.J.HasValue || frame.R.HasValue;
+                bool hasOtherData = frame.M.HasValue || frame.F.HasValue || frame.P.HasValue || frame.S.HasValue;
 
-                if (!hasCoordinate && !(isArc && hasArcCenterData))
+                if (!hasCoordinate && !(isArc && hasArcCenterData) && !hasOtherData)
                     continue;
 
                 double nextX = ResolveAxis(frame.X, currentX, unitScale, absoluteMode);
                 double nextY = ResolveAxis(frame.Y, currentY, unitScale, absoluteMode);
-                var nextPoint = new CadDocumentService.CadCoordinate(nextX, nextY);
+                double nextZ = ResolveAxis(frame.Z, currentZ, unitScale, absoluteMode);
+                var nextPoint = new CadDocumentService.CadCoordinate(nextX, nextY, nextZ);
 
                 if (!hasCurrentPoint)
                 {
                     currentX = nextX;
                     currentY = nextY;
+                    currentZ = nextZ;
                     hasCurrentPoint = true;
                     AddPoint(result.Points, nextPoint);
                     continue;
                 }
 
-                var startPoint = new CadDocumentService.CadCoordinate(currentX, currentY);
+                var startPoint = new CadDocumentService.CadCoordinate(currentX, currentY, currentZ);
 
                 if (isArc)
-                    AddArcPrimitive(result, frame, startPoint, nextPoint, motion == 2, unitScale);
+                    AddArcPrimitive(result, frame, startPoint, nextPoint, motion == 2, unitScale, modalF, modalM, frame.P);
                 else if (!AreClose(startPoint, nextPoint))
-                    AddLinePrimitive(result, startPoint, nextPoint);
+                    AddLinePrimitive(result, startPoint, nextPoint, modalF, modalM, frame.P);
 
                 currentX = nextX;
                 currentY = nextY;
+                currentZ = nextZ;
             }
 
             return result;
@@ -132,19 +142,25 @@ namespace DACDT_2026
         private static void AddLinePrimitive(
             ParseResult result,
             CadDocumentService.CadCoordinate start,
-            CadDocumentService.CadCoordinate end)
+            CadDocumentService.CadCoordinate end,
+            double? speed = null,
+            int? mcode = null,
+            double? dwell = null)
         {
             result.Primitives.Add(new CadDocumentService.CadPrimitiveData
             {
                 SourceType = "Line",
                 Points = new List<CadDocumentService.CadCoordinate>
                 {
-                    new CadDocumentService.CadCoordinate(start.X, start.Y),
-                    new CadDocumentService.CadCoordinate(end.X, end.Y)
+                    new CadDocumentService.CadCoordinate(start.X, start.Y, start.Z),
+                    new CadDocumentService.CadCoordinate(end.X, end.Y, end.Z)
                 },
                 Center = null,
                 IsCw = false,
-                IsCircle = false
+                IsCircle = false,
+                Speed = speed?.ToString(CultureInfo.InvariantCulture),
+                MCodeValue = mcode?.ToString(CultureInfo.InvariantCulture),
+                Dwell = dwell?.ToString(CultureInfo.InvariantCulture)
             });
 
             AddPoint(result.Points, start);
@@ -157,16 +173,19 @@ namespace DACDT_2026
             CadDocumentService.CadCoordinate start,
             CadDocumentService.CadCoordinate end,
             bool isCw,
-            double unitScale)
+            double unitScale,
+            double? speed = null,
+            int? mcode = null,
+            double? dwell = null)
         {
             double centerX;
             double centerY;
             if (!TryGetArcCenter(frame, start.X, start.Y, end.X, end.Y, unitScale, isCw, out centerX, out centerY))
                 return;
 
-            var center = new CadDocumentService.CadCoordinate(centerX, centerY);
+            var center = new CadDocumentService.CadCoordinate(centerX, centerY, start.Z);
             List<CadDocumentService.CadCoordinate> arcPoints =
-                SampleArc(start.X, start.Y, end.X, end.Y, centerX, centerY, isCw);
+                SampleArc(start.X, start.Y, end.X, end.Y, centerX, centerY, isCw, start.Z, end.Z);
 
             result.Primitives.Add(new CadDocumentService.CadPrimitiveData
             {
@@ -174,7 +193,10 @@ namespace DACDT_2026
                 Points = arcPoints,
                 Center = center,
                 IsCw = isCw,
-                IsCircle = AreClose(start, end)
+                IsCircle = AreClose(start, end),
+                Speed = speed?.ToString(CultureInfo.InvariantCulture),
+                MCodeValue = mcode?.ToString(CultureInfo.InvariantCulture),
+                Dwell = dwell?.ToString(CultureInfo.InvariantCulture)
             });
 
             AddPoint(result.Points, start);
@@ -263,7 +285,9 @@ namespace DACDT_2026
             double endY,
             double centerX,
             double centerY,
-            bool isCw)
+            bool isCw,
+            double startZ = 0.0,
+            double endZ = 0.0)
         {
             double startAngle = Math.Atan2(startY - centerY, startX - centerX);
             double endAngle = Math.Atan2(endY - centerY, endX - centerX);
@@ -283,9 +307,11 @@ namespace DACDT_2026
                 double angle = isCw
                     ? startAngle - sweep * i / steps
                     : startAngle + sweep * i / steps;
+                double currentZ = startZ + (endZ - startZ) * i / steps;
                 points.Add(new CadDocumentService.CadCoordinate(
                     centerX + radius * Math.Cos(angle),
-                    centerY + radius * Math.Sin(angle)));
+                    centerY + radius * Math.Sin(angle),
+                    currentZ));
             }
 
             return points;

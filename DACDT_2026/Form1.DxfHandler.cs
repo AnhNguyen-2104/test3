@@ -373,7 +373,7 @@ namespace DACDT_2026
                                     "{0:0.###};{1:0.###}", prim.Points[i].X, prim.Points[i].Y),
                                 CenterCoordinate = string.Empty
                             };
-                            ApplyPrimitiveMCode(row, prim);
+                            ApplyPrimitiveExtraData(row, prim);
                             if (!isGcodeDocument && pathClosed && isLastInPath && isLastInPrim)
                                 row.MCodeValue = "2";
                             result.Add(row);
@@ -394,7 +394,7 @@ namespace DACDT_2026
                         if (prim.Center != null)
                             row.CenterCoordinate = string.Format(CultureInfo.InvariantCulture,
                                 "{0:0.###};{1:0.###}", prim.Center.X, prim.Center.Y);
-                        ApplyPrimitiveMCode(row, prim);
+                        ApplyPrimitiveExtraData(row, prim);
                         if (!isGcodeDocument && pathClosed && isLastInPath)
                             row.MCodeValue = "2";
                         result.Add(row);
@@ -480,10 +480,14 @@ namespace DACDT_2026
             return AreClose(first.Points.First(), last.Points.Last());
         }
 
-        private static void ApplyPrimitiveMCode(ProcessRow row, CadDocumentService.CadPrimitiveData primitive)
+        private static void ApplyPrimitiveExtraData(ProcessRow row, CadDocumentService.CadPrimitiveData primitive)
         {
             if (!string.IsNullOrWhiteSpace(primitive?.MCodeValue))
                 row.MCodeValue = primitive.MCodeValue;
+            if (!string.IsNullOrWhiteSpace(primitive?.Speed))
+                row.Speed = primitive.Speed;
+            if (!string.IsNullOrWhiteSpace(primitive?.Dwell))
+                row.Dwell = primitive.Dwell;
         }
 
         private bool AreClose(CadDocumentService.CadCoordinate a, CadDocumentService.CadCoordinate b)
