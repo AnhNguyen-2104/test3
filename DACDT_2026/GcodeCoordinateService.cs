@@ -19,7 +19,7 @@ namespace DACDT_2026
                 throw new ArgumentException("G-code path is empty.", nameof(filePath));
 
             string fullPath = Path.GetFullPath(filePath);
-            ParseResult parsed = ReadGcode(fullPath);
+            ParseResult parsed = ReadGcode(File.ReadLines(fullPath));
 
             return new CadDocumentService.CadLoadResult
             {
@@ -32,7 +32,23 @@ namespace DACDT_2026
             };
         }
 
-        private static ParseResult ReadGcode(string filePath)
+        public CadDocumentService.CadLoadResult LoadAsCadFromText(string text, string fallbackFilePath = null)
+        {
+            var lines = text?.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.None) ?? Array.Empty<string>();
+            ParseResult parsed = ReadGcode(lines);
+
+            return new CadDocumentService.CadLoadResult
+            {
+                FilePath = fallbackFilePath ?? string.Empty,
+                DirectoryPath = fallbackFilePath != null ? Path.GetDirectoryName(fallbackFilePath) : string.Empty,
+                FileName = fallbackFilePath != null ? Path.GetFileName(fallbackFilePath) : "Untitled",
+                Bounds = BuildBounds(parsed.Primitives, parsed.Points),
+                Primitives = parsed.Primitives,
+                Points = BuildPointRows(parsed.Points)
+            };
+        }
+
+        private static ParseResult ReadGcode(IEnumerable<string> lines)
         {
             var result = new ParseResult();
             double currentX = 0.0;
@@ -45,7 +61,7 @@ namespace DACDT_2026
             double? modalF = null;
             int? modalM = null;
 
-            foreach (string rawLine in File.ReadLines(filePath))
+            foreach (string rawLine in lines)
             {
                 string normalized = NormalizeLine(rawLine);
                 if (string.IsNullOrWhiteSpace(normalized))

@@ -207,10 +207,11 @@
           <div class="toolbar-field toolbar-path">
             <input id="cad-path" class="text-input compact" type="text" placeholder="CAD/G-code path" readonly>
           </div>
-          <div class="toolbar-field toolbar-file">
+          <div class="toolbar-field toolbar-file" style="flex: 0 0 120px;">
             <input id="cad-file" class="text-input compact" type="text" placeholder="File name" readonly>
           </div>
-          <button id="open-dxf" class="primary-button toolbar-open compact">Open DXF/G-code</button>
+          <button id="new-gcode-btn" class="primary-button toolbar-open compact" style="background:var(--panel-3); border:1px solid var(--border); color:var(--text); min-height: 38px; padding: 0 12px; margin-right: 4px;" title="Tạo G-code mới">New</button>
+          <button id="open-dxf" class="primary-button toolbar-open compact">Open</button>
           <!-- Offset X / Y -->
           <div class="toolbar-field" style="display:flex;align-items:center;gap:4px; flex:none; margin-left: 12px;">
             <label style="font-size:11px;color:var(--muted);white-space:nowrap;">Offset X</label>

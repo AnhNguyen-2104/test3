@@ -129,10 +129,23 @@ function bindEvents() {
   });
   dom.openDxf.addEventListener("click", () => post("openDxf"));
   const saveGcodeBtn = document.getElementById("save-gcode-btn");
-  if (saveGcodeBtn) {
+  const gcodeTa = document.getElementById("gcode-textarea");
+  let gcodeTimeout;
+  if (saveGcodeBtn && gcodeTa) {
     saveGcodeBtn.addEventListener("click", () => {
-      const ta = document.getElementById("gcode-textarea");
-      if (ta) post("saveGcode", { text: ta.value });
+      post("saveGcode", { text: gcodeTa.value });
+    });
+    gcodeTa.addEventListener("input", () => {
+      clearTimeout(gcodeTimeout);
+      gcodeTimeout = setTimeout(() => {
+        post("previewGcode", { text: gcodeTa.value });
+      }, 400);
+    });
+  }
+  const newGcodeBtn = document.getElementById("new-gcode-btn");
+  if (newGcodeBtn) {
+    newGcodeBtn.addEventListener("click", () => {
+      post("newGcode");
     });
   }
   const setSpeedBtn = document.getElementById("set-speed-btn");
@@ -370,7 +383,9 @@ function renderDxf() {
     if (dxfContainer) dxfContainer.style.display = "none";
     if (gcodeContainer) gcodeContainer.style.display = "flex";
     if (gcodeTextarea && gcodeTextarea._lastRaw !== state.dxf.rawText) {
-      gcodeTextarea.value = state.dxf.rawText || "";
+      if (document.activeElement !== gcodeTextarea) {
+        gcodeTextarea.value = state.dxf.rawText || "";
+      }
       gcodeTextarea._lastRaw = state.dxf.rawText;
     }
   } else {

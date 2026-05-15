@@ -132,6 +132,14 @@ namespace DACDT_2026
                         await HandleSaveGcodeAsync(GetString(payload, "text"));
                         break;
 
+                    case "previewGcode":
+                        await HandlePreviewGcodeAsync(GetString(payload, "text"));
+                        break;
+
+                    case "newGcode":
+                        await HandleNewGcodeAsync();
+                        break;
+
                     case "runAction":
                         await NotifyAsync("info", "DXF RUN", "Các nút Resume, Pause, Start đã có UI HTML.");
                         break;

@@ -110,28 +110,65 @@ namespace DACDT_2026
             rawGcodeText = string.Empty;
         }
 
+        private async Task HandlePreviewGcodeAsync(string text)
+        {
+            if (activeDocumentKind == "GCODE")
+            {
+                try
+                {
+                    rawGcodeText = text;
+                    string path = activeCadDocument?.FilePath;
+                    if (string.IsNullOrEmpty(path)) path = null;
+                    activeCadDocument = gcodeCoordinateService.LoadAsCadFromText(text, path);
+                    
+                    if (activeCadDocument?.Primitives != null)
+                    {
+                        var paths = GetConnectedPathsFromCad(activeCadDocument.Primitives);
+                        activeCadDocument.Primitives.Clear();
+                        foreach (var pathList in paths)
+                            activeCadDocument.Primitives.AddRange(pathList);
+                    }
+
+                    await PushDxfStateAsync();
+                    await HandleImportCadToProcessAsync();
+                    await HandleScanLimitsAsync();
+                }
+                catch(Exception ex)
+                {
+                    // Ignore preview errors if typing incomplete
+                }
+            }
+        }
+
+        private async Task HandleNewGcodeAsync()
+        {
+            ClearLoadedFileState();
+            rawGcodeText = string.Empty;
+            activeDocumentKind = "GCODE";
+            activeCadDocument = gcodeCoordinateService.LoadAsCadFromText("");
+            
+            await PushDxfStateAsync();
+            await HandleImportCadToProcessAsync();
+            await NotifyAsync("info", "G-code", "Đã tạo phiên bản G-code trống.");
+        }
+
         private async Task HandleSaveGcodeAsync(string text)
         {
             if (activeDocumentKind == "GCODE" && activeCadDocument != null)
             {
                 try
                 {
-                    File.WriteAllText(activeCadDocument.FilePath, text);
-                    rawGcodeText = text;
-                    LoadGcodeCoordinatesAsCad(activeCadDocument.FilePath);
-                    
-                    if (activeCadDocument?.Primitives != null)
+                    string path = activeCadDocument.FilePath;
+                    if (string.IsNullOrEmpty(path) || path == "Untitled")
                     {
-                        var paths = GetConnectedPathsFromCad(activeCadDocument.Primitives);
-                        activeCadDocument.Primitives.Clear();
-                        foreach (var path in paths)
-                            activeCadDocument.Primitives.AddRange(path);
+                        path = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "New_GCode_" + DateTime.Now.ToString("yyyyMMdd_HHmmss") + ".gcode");
+                        activeCadDocument.FilePath = path;
+                        activeCadDocument.FileName = Path.GetFileName(path);
                     }
-
-                    await PushDxfStateAsync();
-                    await HandleImportCadToProcessAsync();
-                    await HandleScanLimitsAsync();
-                    await NotifyAsync("success", "G-code", "Lưu G-code thành công và đã áp dụng.");
+                    
+                    File.WriteAllText(path, text);
+                    await HandlePreviewGcodeAsync(text);
+                    await NotifyAsync("success", "G-code", $"Lưu G-code thành công tại:\n{path}");
                 }
                 catch(Exception ex)
                 {
