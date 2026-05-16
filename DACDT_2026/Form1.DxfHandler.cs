@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Text;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 
@@ -248,6 +249,7 @@ namespace DACDT_2026
             else if (string.Equals(key, "zSafe", StringComparison.OrdinalIgnoreCase))
                 globalZSafe = value;
 
+            UpdateGcodeFromProcessTable();
             await PushDxfStateAsync();
             await NotifyAsync("success", "Configuration", $"Updated {key} = {value}");
         }
@@ -260,7 +262,82 @@ namespace DACDT_2026
             if (field == "mcode") row.MCodeValue = value;
             else if (field == "dwell") row.Dwell = value;
             else if (field == "speed") row.Speed = value;
+            
+            UpdateGcodeFromProcessTable();
             await PushDxfStateAsync();
+        }
+
+        private void UpdateGcodeFromProcessTable()
+        {
+            if (activeDocumentKind != "GCODE" || processRows == null || processRows.Count == 0) return;
+
+            StringBuilder sb = new StringBuilder();
+            sb.AppendLine("; Generated from Process Table");
+            sb.AppendLine("G90");
+            sb.AppendLine("G21");
+
+            double currentX = 0;
+            double currentY = 0;
+
+            foreach (var row in processRows)
+            {
+                if (string.IsNullOrEmpty(row.EndCoordinate)) continue;
+                string[] endCoords = row.EndCoordinate.Split(';');
+                if (endCoords.Length < 2) continue;
+
+                double nextX = 0, nextY = 0;
+                double.TryParse(endCoords[0], NumberStyles.Float, CultureInfo.InvariantCulture, out nextX);
+                double.TryParse(endCoords[1], NumberStyles.Float, CultureInfo.InvariantCulture, out nextY);
+
+                string g = "G1";
+                if (row.MotionType.StartsWith("Arc CW")) g = "G2";
+                else if (row.MotionType.StartsWith("Arc CCW")) g = "G3";
+                else if (row.MotionType.StartsWith("Circle CW")) g = "G2";
+                else if (row.MotionType.StartsWith("Circle CCW")) g = "G3";
+                else if (row.MotionType.StartsWith("Circle")) g = "G2";
+                else if (row.MotionType.Contains("Rapid") || row.MotionType.Contains("G0")) g = "G0";
+
+                string f = !string.IsNullOrEmpty(row.Speed) ? $" F{row.Speed}" : "";
+
+                if (!string.IsNullOrEmpty(row.MCodeValue))
+                {
+                    if (row.MCodeValue == "1") sb.AppendLine("M1");
+                    else if (row.MCodeValue == "2") sb.AppendLine("M2");
+                    else sb.AppendLine($"M{row.MCodeValue}");
+                }
+
+                if (g == "G1" || g == "G0")
+                {
+                    sb.AppendLine($"{g} X{nextX.ToString("0.###", CultureInfo.InvariantCulture)} Y{nextY.ToString("0.###", CultureInfo.InvariantCulture)}{f}");
+                }
+                else if (g == "G2" || g == "G3")
+                {
+                    if (!string.IsNullOrEmpty(row.CenterCoordinate))
+                    {
+                        string[] centers = row.CenterCoordinate.Split(';');
+                        if (centers.Length >= 2)
+                        {
+                            double cx = 0, cy = 0;
+                            double.TryParse(centers[0], NumberStyles.Float, CultureInfo.InvariantCulture, out cx);
+                            double.TryParse(centers[1], NumberStyles.Float, CultureInfo.InvariantCulture, out cy);
+                            
+                            double i = cx - currentX;
+                            double j = cy - currentY;
+                            
+                            sb.AppendLine($"{g} X{nextX.ToString("0.###", CultureInfo.InvariantCulture)} Y{nextY.ToString("0.###", CultureInfo.InvariantCulture)} I{i.ToString("0.###", CultureInfo.InvariantCulture)} J{j.ToString("0.###", CultureInfo.InvariantCulture)}{f}");
+                        }
+                    }
+                    else
+                    {
+                        sb.AppendLine($"{g} X{nextX.ToString("0.###", CultureInfo.InvariantCulture)} Y{nextY.ToString("0.###", CultureInfo.InvariantCulture)}{f}");
+                    }
+                }
+
+                currentX = nextX;
+                currentY = nextY;
+            }
+
+            rawGcodeText = sb.ToString();
         }
 
         // ── Import CAD → Process table ───────────────────────────────────────────
@@ -456,14 +533,16 @@ namespace DACDT_2026
                             ? "Line (Continuous Path)"
                             : "Line (Continuous Positioning)";
 
-                        result.Add(new ProcessRow
+                        var startRow = new ProcessRow
                         {
                             MotionType       = startMotion,
                             EndCoordinate    = string.Format(CultureInfo.InvariantCulture,
                                 "{0:0.###};{1:0.###}", startPt.X, startPt.Y),
                             CenterCoordinate = string.Empty,
                             MCodeValue       = (!isGcodeDocument && pathClosed) ? "1" : string.Empty
-                        });
+                        };
+                        ApplyPrimitiveExtraData(startRow, prim);
+                        result.Add(startRow);
                     }
 
                     if (prim.SourceType.Contains("Line") || prim.SourceType.Contains("Polyline"))
