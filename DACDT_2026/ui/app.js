@@ -292,6 +292,19 @@ function handleHostMessage(msg) {
     case "log":
       addLocalEvent("info", msg.payload.title, msg.payload.message);
       break;
+    case "updateSendProgress":
+      const btn = document.getElementById("send-cad-x-button");
+      if (btn) {
+        if (msg.payload.done) {
+          btn.textContent = "Send CAD to PLC";
+          btn.disabled = false;
+        } else {
+          btn.disabled = true;
+          const p = Math.round((msg.payload.current / msg.payload.total) * 100);
+          btn.textContent = `Sending ${msg.payload.axis}: ${p}% (${msg.payload.current}/${msg.payload.total})`;
+        }
+      }
+      break;
   }
 }
 

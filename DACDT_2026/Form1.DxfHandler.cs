@@ -438,40 +438,40 @@ namespace DACDT_2026
             {
                 // ── BƯỚC 1: Master axis (Axis 1 / X): nạp dữ liệu vào bộ đệm (G2000+) ────
                 // Tắt writeStartNo để máy KHÔNG chạy ngay lập tức.
-                var sendResult = QD75BufferWriter.WritePositioningData(plcComm, 0, dataRows, writeStartNo: false);
-
-                foreach (var wr in sendResult.WriteResults)
+                Action<int, int> progressCbX = (current, total) => 
                 {
-                    AddLogEntry(wr.Address, wr.Value, "Write", wr.Status, wr.Message);
-                    if (!wr.Status.StartsWith("OK"))
-                        await NotifyAsync("error", "Telemetry [Axis1]", $"{wr.Address}: {wr.Message}");
-                }
+                    _ = PostToUiAsync("updateSendProgress", new { axis = "X", current, total });
+                    // Small delay to allow UI to render and keep responsiveness
+                    Task.Delay(10).Wait(); 
+                };
+
+                var sendResult = QD75BufferWriter.WritePositioningDataBulk(plcComm, 0, dataRows, writeStartNo: false, progressCbX);
 
                 if (!sendResult.Success)
                 {
-                    await NotifyAsync("error", "Telemetry [Axis1]", "Failed to load Axis 1 buffer.");
+                    await NotifyAsync("error", "Telemetry [Axis1]", $"Failed to load Axis 1 buffer: {sendResult.ErrorMessage}");
                     return;
                 }
 
                 // ── BƯỚC 2: Slave axis (Axis 2 / Y): nạp toạ độ vào bộ đệm (G8006+) ──────
-                var slaveResult = QD75BufferWriter.WriteSlaveAxisData(plcComm, dataRows, slaveBaseG: 8000);
-
-                foreach (var wr in slaveResult.WriteResults)
+                Action<int, int> progressCbY = (current, total) => 
                 {
-                    AddLogEntry(wr.Address, wr.Value, "Write", wr.Status, wr.Message);
-                    if (!wr.Status.StartsWith("OK"))
-                        await NotifyAsync("error", "Telemetry [Axis2]", $"{wr.Address}: {wr.Message}");
-                }
+                    _ = PostToUiAsync("updateSendProgress", new { axis = "Y", current, total });
+                    Task.Delay(10).Wait();
+                };
+
+                var slaveResult = QD75BufferWriter.WriteSlaveAxisDataBulk(plcComm, dataRows, slaveBaseG: 8000, progressCbY);
 
                 if (!slaveResult.Success)
                 {
-                    await NotifyAsync("error", "Telemetry [Axis2]", "Failed to load Axis 2 buffer.");
+                    await NotifyAsync("error", "Telemetry [Axis2]", $"Failed to load Axis 2 buffer: {slaveResult.ErrorMessage}");
                     return;
                 }
 
                 // Không tự động ghi Start No. vào G1500 nữa.
                 // Người dùng sẽ nhấn nút "START ACTION (M2000)" trên giao diện để kích hoạt chạy máy.
-                await NotifyAsync("success", "PLC", $"CAD data loaded: {dataRows.Count} points → Axis 1 (G2000+) & Axis 2 (G8006+). Press START ACTION to run.");
+                _ = PostToUiAsync("updateSendProgress", new { done = true });
+                await NotifyAsync("success", "PLC", $"CAD data loaded: {dataRows.Count} points → Axis 1 & Axis 2. Press START ACTION to run.");
             }
             finally
             {

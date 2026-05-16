@@ -368,7 +368,7 @@ namespace DACDT_2026
         /// <param name="rows">List of positioning data rows. Only EndCoordinate (Y axis) and CenterCoordinate (Y) are used.</param>
         /// <param name="slaveBaseG">Buffer base address for slave axis. Default = 8000 (Axis 2).</param>
         /// <returns>SendResult with all write results.</returns>
-        public static SendResult WriteSlaveAxisData(PLCCommunication plcComm, List<PositioningDataRow> rows, int slaveBaseG = 8000)
+        public static SendResult WriteSlaveAxisDataBulk(PLCCommunication plcComm, List<PositioningDataRow> rows, int slaveBaseG = 8000, Action<int, int> progressCallback = null)
         {
             var result = new SendResult { Success = true };
 
@@ -386,53 +386,51 @@ namespace DACDT_2026
                 return result;
             }
 
-            int n = 1;
-            foreach (var row in rows)
+            int chunkSize = 50;
+            for (int i = 0; i < rows.Count; i += chunkSize)
             {
-                // Parse Y coordinate from EndCoordinate ("X;Y" format) → Da.6 position
-                int endY = 0;
-                bool hasEnd = TryParseCoordinateY(row.EndCoordinate, out endY);
+                int currentChunkSize = Math.Min(chunkSize, rows.Count - i);
+                int totalWords = currentChunkSize * Stride;
+                short[] bulkData = new short[totalWords];
 
-                // Parse Y coordinate from CenterCoordinate → Da.7 arc address
-                int centerY = 0;
-                bool hasCenter = TryParseCoordinateY(row.CenterCoordinate, out centerY);
+                for (int j = 0; j < currentChunkSize; j++)
+                {
+                    var row = rows[i + j];
+                    int blockOffset = j * Stride;
 
-                int blockBase = slaveBaseG + (n - 1) * Stride;
+                    int endY = 0;
+                    if (TryParseCoordinateY(row.EndCoordinate, out endY))
+                    {
+                        bulkData[blockOffset + OffsetPosX] = (short)(endY & 0xFFFF);
+                        bulkData[blockOffset + OffsetPosX + 1] = (short)((endY >> 16) & 0xFFFF);
+                    }
+
+                    int centerY = 0;
+                    if (TryParseCoordinateY(row.CenterCoordinate, out centerY))
+                    {
+                        bulkData[blockOffset + OffsetCenterX] = (short)(centerY & 0xFFFF);
+                        bulkData[blockOffset + OffsetCenterX + 1] = (short)((centerY >> 16) & 0xFFFF);
+                    }
+                }
 
                 try
                 {
-                    // Trục 2 (Slave) chỉ quan tâm đến toạ độ đích và tâm cung tròn.
-                    // Các thông số khác (Da.1~Da.5, Da.8, Da.9) KHÔNG ĐƯỢC GHI để tránh xung đột cấu hình.
-
-                    // Da.6 Positioning address (32-bit) — U0\G(8000 + (n-1)*10 + 6)
-                    if (hasEnd)
+                    int chunkBaseG = slaveBaseG + i * Stride;
+                    int res = plcComm.WriteBuffer(0, chunkBaseG, bulkData);
+                    if (res != 0)
                     {
-                        var rP = Write32(plcComm, blockBase + OffsetPosX, endY, "Slave PosY");
-                        result.WriteResults.Add(rP);
-                        if (!rP.Status.StartsWith("OK")) result.Success = false;
+                        result.Success = false;
+                        result.ErrorMessage = $"Slave WriteBuffer failed at point {i + 1} with error code: {res}";
+                        return result;
                     }
-
-                    // Da.7 Arc address (32-bit) — U0\G(8000 + (n-1)*10 + 8)
-                    if (hasCenter)
-                    {
-                        var rC = Write32(plcComm, blockBase + OffsetCenterX, centerY, "Slave CenterY");
-                        result.WriteResults.Add(rC);
-                        if (!rC.Status.StartsWith("OK")) result.Success = false;
-                    }
+                    progressCallback?.Invoke(i + currentChunkSize, rows.Count);
                 }
                 catch (Exception ex)
                 {
-                    result.WriteResults.Add(new WriteResult
-                    {
-                        Address = $"U0\\G{blockBase + OffsetPosX}",
-                        Value   = string.Empty,
-                        Status  = "Error",
-                        Message = ex.Message
-                    });
                     result.Success = false;
+                    result.ErrorMessage = ex.Message;
+                    return result;
                 }
-
-                n++;
             }
 
             return result;
@@ -544,7 +542,7 @@ namespace DACDT_2026
         /// Send all positioning data rows to PLC using a single bulk WriteBuffer call.
         /// This is significantly faster than individual writes for large point sets.
         /// </summary>
-        public static SendResult WritePositioningDataBulk(PLCCommunication plcComm, int axisIndex, List<PositioningDataRow> rows, bool writeStartNo = true)
+        public static SendResult WritePositioningDataBulk(PLCCommunication plcComm, int axisIndex, List<PositioningDataRow> rows, bool writeStartNo = true, Action<int, int> progressCallback = null)
         {
             var result = new SendResult { Success = true };
 
@@ -563,72 +561,65 @@ namespace DACDT_2026
             }
 
             int baseG = ProgramBaseG[axisIndex];
-            int totalWords = rows.Count * Stride;
-            short[] bulkData = new short[totalWords];
+            int chunkSize = 50; 
 
-            for (int i = 0; i < rows.Count; i++)
+            for (int i = 0; i < rows.Count; i += chunkSize)
             {
-                var row = rows[i];
-                int blockOffset = i * Stride;
+                int currentChunkSize = Math.Min(chunkSize, rows.Count - i);
+                int totalWords = currentChunkSize * Stride;
+                short[] bulkData = new short[totalWords];
 
-                // 1. Positioning Identifier (16-bit)
-                short moveCode = BuildPositioningIdentifierWord(row.MotionType);
-                bulkData[blockOffset + OffsetMoveCode] = moveCode;
-
-                // 2. M Code (16-bit)
-                int mcodeVal = ParseInt(row.MCodeValue);
-                bulkData[blockOffset + OffsetMCode] = (short)mcodeVal;
-
-                // 3. Dwell Time (16-bit)
-                int dwellVal = ParseInt(row.Dwell);
-                bulkData[blockOffset + OffsetDwell] = (short)dwellVal;
-
-                // 4. Command Speed (32-bit -> 2 words)
-                int speedVal = ParseInt(row.Speed) * SpeedMultiplier;
-                bulkData[blockOffset + OffsetSpeed] = (short)(speedVal & 0xFFFF);
-                bulkData[blockOffset + OffsetSpeed + 1] = (short)((speedVal >> 16) & 0xFFFF);
-
-                // 5. Position X (32-bit -> 2 words)
-                int endX = 0;
-                if (TryParseCoordinateX(row.EndCoordinate, out endX))
+                for (int j = 0; j < currentChunkSize; j++)
                 {
-                    bulkData[blockOffset + OffsetPosX] = (short)(endX & 0xFFFF);
-                    bulkData[blockOffset + OffsetPosX + 1] = (short)((endX >> 16) & 0xFFFF);
+                    var row = rows[i + j];
+                    int blockOffset = j * Stride;
+
+                    short moveCode = BuildPositioningIdentifierWord(row.MotionType);
+                    bulkData[blockOffset + OffsetMoveCode] = moveCode;
+
+                    int mcodeVal = ParseInt(row.MCodeValue);
+                    bulkData[blockOffset + OffsetMCode] = (short)mcodeVal;
+
+                    int dwellVal = ParseInt(row.Dwell);
+                    bulkData[blockOffset + OffsetDwell] = (short)dwellVal;
+
+                    int speedVal = ParseInt(row.Speed) * SpeedMultiplier;
+                    bulkData[blockOffset + OffsetSpeed] = (short)(speedVal & 0xFFFF);
+                    bulkData[blockOffset + OffsetSpeed + 1] = (short)((speedVal >> 16) & 0xFFFF);
+
+                    int endX = 0;
+                    if (TryParseCoordinateX(row.EndCoordinate, out endX))
+                    {
+                        bulkData[blockOffset + OffsetPosX] = (short)(endX & 0xFFFF);
+                        bulkData[blockOffset + OffsetPosX + 1] = (short)((endX >> 16) & 0xFFFF);
+                    }
+
+                    int centerX = 0;
+                    if (TryParseCoordinateX(row.CenterCoordinate, out centerX))
+                    {
+                        bulkData[blockOffset + OffsetCenterX] = (short)(centerX & 0xFFFF);
+                        bulkData[blockOffset + OffsetCenterX + 1] = (short)((centerX >> 16) & 0xFFFF);
+                    }
                 }
 
-                // 6. Center X (32-bit -> 2 words)
-                int centerX = 0;
-                if (TryParseCoordinateX(row.CenterCoordinate, out centerX))
+                try
                 {
-                    bulkData[blockOffset + OffsetCenterX] = (short)(centerX & 0xFFFF);
-                    bulkData[blockOffset + OffsetCenterX + 1] = (short)((centerX >> 16) & 0xFFFF);
+                    int chunkBaseG = baseG + i * Stride;
+                    int res = plcComm.WriteBuffer(0, chunkBaseG, bulkData);
+                    if (res != 0)
+                    {
+                        result.Success = false;
+                        result.ErrorMessage = $"WriteBuffer failed at point {i + 1} with error code: {res}";
+                        return result;
+                    }
+                    progressCallback?.Invoke(i + currentChunkSize, rows.Count);
                 }
-            }
-
-            try
-            {
-                // Write entire block: U0\G(baseG) to U0\G(baseG + totalWords - 1)
-                int res = plcComm.WriteBuffer(0, baseG, bulkData);
-                if (res != 0)
+                catch (Exception ex)
                 {
                     result.Success = false;
-                    result.ErrorMessage = $"WriteBuffer failed with error code: {res}";
+                    result.ErrorMessage = ex.Message;
+                    return result;
                 }
-                else
-                {
-                    result.WriteResults.Add(new WriteResult
-                    {
-                        Address = $"U0\\G{baseG} to U0\\G{baseG + totalWords - 1}",
-                        Value = $"Bulk write {rows.Count} points",
-                        Status = "OK",
-                        Message = "Bulk WriteBuffer successful"
-                    });
-                }
-            }
-            catch (Exception ex)
-            {
-                result.Success = false;
-                result.ErrorMessage = ex.Message;
             }
 
             // Write Start No. = 1 to Control base register
