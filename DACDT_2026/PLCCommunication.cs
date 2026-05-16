@@ -317,20 +317,16 @@ namespace DACDT_2026
                         int blockCount = Math.Min(MaxBufferWordsPerCall, count - written);
                         int currentOffset = offset + written;
                         int currentAddress = address + written;
-                        int result;
 
-                        try
-                        {
-                            result = plcDevice.WriteBuffer(startIO, currentAddress, blockCount, ref data[currentOffset]);
-                        }
-                        catch
-                        {
-                            result = WriteBufferWordsLocked(startIO, currentAddress, data, currentOffset, blockCount);
-                        }
+                        // COM WriteBuffer cần ref phần tử đầu của mảng liên tục — ref data[i] giữa mảng
+                        // với dynamic COM chỉ marshal 1 word → dữ liệu từ điểm 2 trở đi lệch (G2010+).
+                        short[] chunk = new short[blockCount];
+                        Array.Copy(data, currentOffset, chunk, 0, blockCount);
 
+                        int result = plcDevice.WriteBuffer(startIO, currentAddress, blockCount, ref chunk[0]);
                         if (result != 0)
                         {
-                            result = WriteBufferWordsLocked(startIO, currentAddress, data, currentOffset, blockCount);
+                            result = WriteBufferWordsLocked(startIO, currentAddress, chunk, 0, blockCount);
                             if (result != 0) return result;
                         }
 

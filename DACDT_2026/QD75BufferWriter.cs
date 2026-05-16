@@ -34,12 +34,13 @@ namespace DACDT_2026
 
         // Program data offsets within each positioning data block (stride = 10 words)
         public const int Stride = 10;
-        public const int OffsetMoveCode = 0;  // U0\G(base + (n-1)*10 + 0)
+        public const int OffsetMoveCode = 0;  // U0\G(base + (n-1)*10 + 0) Positioning Identifier
         public const int OffsetMCode = 1;     // U0\G(base + (n-1)*10 + 1)
         public const int OffsetDwell = 2;     // U0\G(base + (n-1)*10 + 2)
+        public const int OffsetReserved = 3;  // U0\G(base + (n-1)*10 + 3) reserved / 0
         public const int OffsetSpeed = 4;     // U0\G(base + (n-1)*10 + 4) -> 32-bit (L, H)
-        public const int OffsetPosX = 6;      // U0\G(base + (n-1)*10 + 6) -> 32-bit (L, H)
-        public const int OffsetCenterX = 8;   // U0\G(base + (n-1)*10 + 8) -> 32-bit (L, H)
+        public const int OffsetPosX = 6;      // U0\G(base + (n-1)*10 + 6) -> 32-bit (L, H) — toạ độ trục này
+        public const int OffsetCenterX = 8;   // U0\G(base + (n-1)*10 + 8) -> 32-bit (L, H) — tâm cung trục này
 
         // Coordinate multiplier: DXF mm → QD75 0.1µm units
         public const double CoordinateMultiplier = 10000.0;
@@ -219,9 +220,10 @@ namespace DACDT_2026
                             var row = chunkRows[i];
                             short[] pointData = new short[Stride];
 
-                            pointData[OffsetMoveCode] = BuildPositioningIdentifierWord(row.MotionType);
+                            pointData[OffsetMoveCode] = BuildPositioningIdentifierWord(row.MotionType, partnerAxis: 1);
                             pointData[OffsetMCode] = (short)ParseInt(row.MCodeValue);
                             pointData[OffsetDwell] = (short)ParseInt(row.Dwell);
+                            pointData[OffsetReserved] = 0;
 
                             int speedVal = ParseInt(row.Speed) * SpeedMultiplier;
                             pointData[OffsetSpeed] = (short)(speedVal & 0xFFFF);
@@ -338,23 +340,24 @@ namespace DACDT_2026
                         {
                             var row = chunkRows[i];
                             int pointAddress = slaveBaseG + (startIdx + i) * Stride;
+                            short[] pointData = new short[Stride];
+                            FillPositioningPointWords(pointData, 0, row, partnerAxis: 0, useYAxis: true);
 
-                            int endY = 0;
-                            if (TryParseCoordinateY(row.EndCoordinate, out endY))
+                            try
                             {
-                                short[] posData = new short[2];
-                                posData[0] = (short)(endY & 0xFFFF);
-                                posData[1] = (short)((endY >> 16) & 0xFFFF);
-                                localPlc.WriteBuffer(0, pointAddress + OffsetPosX, posData);
+                                int res = localPlc.WriteBuffer(0, pointAddress, pointData);
+                                if (res != 0)
+                                {
+                                    result.Success = false;
+                                    result.ErrorMessage = $"Lỗi ghi trục 2 điểm {startIdx + i + 1} tại G{pointAddress}: {res}";
+                                    return result;
+                                }
                             }
-
-                            int centerY = 0;
-                            if (TryParseCoordinateY(row.CenterCoordinate, out centerY))
+                            catch (Exception ex)
                             {
-                                short[] arcData = new short[2];
-                                arcData[0] = (short)(centerY & 0xFFFF);
-                                arcData[1] = (short)((centerY >> 16) & 0xFFFF);
-                                localPlc.WriteBuffer(0, pointAddress + OffsetCenterX, arcData);
+                                result.Success = false;
+                                result.ErrorMessage = ex.Message;
+                                return result;
                             }
 
                             if (progressCallback != null)
@@ -397,39 +400,8 @@ namespace DACDT_2026
 
             return await Task.Run(() =>
             {
-                var result = new SendResult { Success = true };
-                int baseG = ProgramBaseG[axisIndex];
-
-                try
-                {
-                    short[] allWords = BuildMasterAxisWords(rows);
-                    int maxRowsPerWrite = Math.Max(1, MaxWordsPerPlcWrite / Stride);
-
-                    for (int rowOffset = 0; rowOffset < rows.Count; rowOffset += maxRowsPerWrite)
-                    {
-                        int rowsInBlock = Math.Min(maxRowsPerWrite, rows.Count - rowOffset);
-                        int wordOffset = rowOffset * Stride;
-                        int wordCount = rowsInBlock * Stride;
-                        int address = baseG + wordOffset;
-
-                        int res = plcComm.WriteBufferBlock(0, address, allWords, wordOffset, wordCount);
-                        if (res != 0)
-                        {
-                            result.Success = false;
-                            result.ErrorMessage = $"Failed to write Axis {axisIndex + 1} block at G{address}: {res}";
-                            return result;
-                        }
-
-                        progressCallback?.Invoke(rowOffset + rowsInBlock, rows.Count);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    result.Success = false;
-                    result.ErrorMessage = ex.Message;
-                }
-
-                return result;
+                short[] allWords = BuildMasterAxisWords(rows);
+                return WriteProgramBufferBlock(plcComm, ProgramBaseG[axisIndex], allWords, rows.Count, axisIndex + 1, progressCallback);
             });
         }
 
@@ -440,37 +412,53 @@ namespace DACDT_2026
 
             return await Task.Run(() =>
             {
-                var result = new SendResult { Success = true };
-
-                try
-                {
-                    short[] slaveWords = BuildSlaveAxisPositionWords(rows);
-
-                    for (int i = 0; i < rows.Count; i++)
-                    {
-                        int address = slaveBaseG + (i * Stride) + OffsetPosX;
-                        int wordOffset = i * 4;
-                        int res = plcComm.WriteBufferBlock(0, address, slaveWords, wordOffset, 4);
-                        if (res != 0)
-                        {
-                            result.Success = false;
-                            result.ErrorMessage = $"Failed to write Axis 2 point {i + 1} at G{address}: {res}";
-                            return result;
-                        }
-
-                        int completed = i + 1;
-                        if (completed % SlaveProgressStep == 0 || completed == rows.Count)
-                            progressCallback?.Invoke(completed, rows.Count);
-                    }
-                }
-                catch (Exception ex)
-                {
-                    result.Success = false;
-                    result.ErrorMessage = ex.Message;
-                }
-
-                return result;
+                short[] allWords = BuildSlaveAxisWords(rows);
+                return WriteProgramBufferBlock(plcComm, slaveBaseG, allWords, rows.Count, 2, progressCallback);
             });
+        }
+
+        /// <summary>
+        /// Ghi khối program buffer: điểm i → G(base + i*10) … G(base + i*10 + 9), tối đa 900 word/lần WriteBuffer.
+        /// </summary>
+        private static SendResult WriteProgramBufferBlock(
+            PLCCommunication plcComm,
+            int baseG,
+            short[] allWords,
+            int pointCount,
+            int axisNumber,
+            Action<int, int> progressCallback)
+        {
+            var result = new SendResult { Success = true };
+
+            try
+            {
+                int maxRowsPerWrite = Math.Max(1, MaxWordsPerPlcWrite / Stride);
+
+                for (int rowOffset = 0; rowOffset < pointCount; rowOffset += maxRowsPerWrite)
+                {
+                    int rowsInBlock = Math.Min(maxRowsPerWrite, pointCount - rowOffset);
+                    int wordOffset = rowOffset * Stride;
+                    int wordCount = rowsInBlock * Stride;
+                    int address = baseG + wordOffset;
+
+                    int res = plcComm.WriteBufferBlock(0, address, allWords, wordOffset, wordCount);
+                    if (res != 0)
+                    {
+                        result.Success = false;
+                        result.ErrorMessage = $"Axis {axisNumber}: WriteBufferBlock failed at U0\\G{address} ({wordCount} words), code {res}";
+                        return result;
+                    }
+
+                    progressCallback?.Invoke(rowOffset + rowsInBlock, pointCount);
+                }
+            }
+            catch (Exception ex)
+            {
+                result.Success = false;
+                result.ErrorMessage = ex.Message;
+            }
+
+            return result;
         }
 
         private static SendResult ValidateBulkRequest(PLCCommunication plcComm, List<PositioningDataRow> rows)
@@ -487,19 +475,47 @@ namespace DACDT_2026
         private static short[] BuildMasterAxisWords(List<PositioningDataRow> rows)
         {
             short[] words = new short[rows.Count * Stride];
-
             Parallel.For(0, rows.Count, i =>
+                FillPositioningPointWords(words, i * Stride, rows[i], partnerAxis: 1, useYAxis: false));
+            return words;
+        }
+
+        /// <summary>Trục 2 (G8000+): full 10 word/điểm, toạ độ Y tại offset +6/+7, trục ghép Da.5 = trục 1.</summary>
+        private static short[] BuildSlaveAxisWords(List<PositioningDataRow> rows)
+        {
+            short[] words = new short[rows.Count * Stride];
+            Parallel.For(0, rows.Count, i =>
+                FillPositioningPointWords(words, i * Stride, rows[i], partnerAxis: 0, useYAxis: true));
+            return words;
+        }
+
+        private static void FillPositioningPointWords(
+            short[] words,
+            int baseIndex,
+            PositioningDataRow row,
+            int partnerAxis,
+            bool useYAxis)
+        {
+            words[baseIndex + OffsetMoveCode] = BuildPositioningIdentifierWord(row.MotionType, partnerAxis);
+            words[baseIndex + OffsetMCode] = (short)ParseInt(row.MCodeValue);
+            words[baseIndex + OffsetDwell] = (short)ParseInt(row.Dwell);
+            words[baseIndex + OffsetReserved] = 0;
+
+            int speedVal = ParseInt(row.Speed) * SpeedMultiplier;
+            WriteInt32Words(words, baseIndex + OffsetSpeed, speedVal);
+
+            if (useYAxis)
             {
-                int baseIndex = i * Stride;
-                PositioningDataRow row = rows[i];
+                int endY;
+                if (TryParseCoordinateY(row.EndCoordinate, out endY))
+                    WriteInt32Words(words, baseIndex + OffsetPosX, endY);
 
-                words[baseIndex + OffsetMoveCode] = BuildPositioningIdentifierWord(row.MotionType);
-                words[baseIndex + OffsetMCode] = (short)ParseInt(row.MCodeValue);
-                words[baseIndex + OffsetDwell] = (short)ParseInt(row.Dwell);
-
-                int speedVal = ParseInt(row.Speed) * SpeedMultiplier;
-                WriteInt32Words(words, baseIndex + OffsetSpeed, speedVal);
-
+                int centerY;
+                if (TryParseCoordinateY(row.CenterCoordinate, out centerY))
+                    WriteInt32Words(words, baseIndex + OffsetCenterX, centerY);
+            }
+            else
+            {
                 int endX;
                 if (TryParseCoordinateX(row.EndCoordinate, out endX))
                     WriteInt32Words(words, baseIndex + OffsetPosX, endX);
@@ -507,29 +523,7 @@ namespace DACDT_2026
                 int centerX;
                 if (TryParseCoordinateX(row.CenterCoordinate, out centerX))
                     WriteInt32Words(words, baseIndex + OffsetCenterX, centerX);
-            });
-
-            return words;
-        }
-
-        private static short[] BuildSlaveAxisPositionWords(List<PositioningDataRow> rows)
-        {
-            short[] words = new short[rows.Count * 4];
-
-            Parallel.For(0, rows.Count, i =>
-            {
-                int baseIndex = i * 4;
-
-                int endY;
-                if (TryParseCoordinateY(rows[i].EndCoordinate, out endY))
-                    WriteInt32Words(words, baseIndex, endY);
-
-                int centerY;
-                if (TryParseCoordinateY(rows[i].CenterCoordinate, out centerY))
-                    WriteInt32Words(words, baseIndex + 2, centerY);
-            });
-
-            return words;
+            }
         }
 
         private static void WriteInt32Words(short[] words, int index, int value)
