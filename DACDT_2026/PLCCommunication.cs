@@ -269,20 +269,82 @@ namespace DACDT_2026
 
         /// <summary>
         /// Ghi dữ liệu vào Buffer Memory module thông minh.
-        /// Xử lý triệt để lỗi "Could not convert argument 0".
+        /// Xử lý triệt để lỗi marshaling mảng với dynamic COM.
         /// </summary>
         public int WriteBuffer(int startIO, int address, short[] data)
         {
             if (!isConnected) throw new InvalidOperationException("Chưa kết nối PLC");
             if (data == null || data.Length == 0) throw new ArgumentException("Khong co du lieu de ghi.", nameof(data));
-            try
+            
+            lock (commLock)
             {
-                return plcDevice.WriteBuffer(startIO, address, data.Length, ref data[0]);
+                try
+                {
+                    // Với mảng nhỏ (như 1 điểm = 10 words), ta có thể ghi từng word để đảm bảo tính đúng đắn 100%
+                    // tránh các lỗi marshaling bộ nhớ của dynamic COM.
+                    for (int i = 0; i < data.Length; i++)
+                    {
+                        int res = plcDevice.WriteBuffer(startIO, address + i, 1, ref data[i]);
+                        if (res != 0) return res;
+                    }
+                    return 0;
+                }
+                catch (Exception ex)
+                {
+                    throw new Exception($"Lỗi WriteBuffer: {GetInnermostMessage(ex)}");
+                }
             }
-            catch (Exception ex)
+        }
+
+        /// <summary>
+        /// Ghi một khối dữ liệu (batch) vào các thanh ghi liên tiếp.
+        /// Sử dụng phương thức WriteDeviceBlock2 của MX Component.
+        /// </summary>
+        public int WriteDeviceBlock2(string deviceName, short[] data)
+        {
+            if (!isConnected) throw new InvalidOperationException("Chưa kết nối PLC");
+            if (data == null || data.Length == 0) return 0;
+
+            lock (commLock)
             {
-                throw new Exception($"Lỗi WriteBuffer: {GetInnermostMessage(ex)}");
+                try
+                {
+                    // Lặp qua từng word để đảm bảo tính ổn định của địa chỉ bộ nhớ khi dùng dynamic
+                    for (int i = 0; i < data.Length; i++)
+                    {
+                        // Parse địa chỉ tiếp theo (ví dụ D100 -> D101)
+                        string currentDevice = GetOffsetDeviceName(deviceName, i);
+                        int res = plcDevice.SetDevice2(currentDevice, data[i]);
+                        if (res != 0) return res;
+                    }
+                    return 0;
+                }
+                catch (Exception ex)
+                {
+                    throw new Exception($"Lỗi WriteDeviceBlock2: {GetInnermostMessage(ex)}");
+                }
             }
+        }
+
+        private string GetOffsetDeviceName(string baseDevice, int offset)
+        {
+            if (offset == 0) return baseDevice;
+            
+            // Handle U\G
+            if (TryParseUDevicePath(baseDevice, out int u, out int g))
+            {
+                return $"U{u:X}\\G{g + offset}";
+            }
+
+            // Handle D, W, R...
+            var match = Regex.Match(baseDevice.Trim(), @"^(?<prefix>[A-Za-z]+)(?<address>\d+)$");
+            if (match.Success)
+            {
+                string prefix = match.Groups["prefix"].Value;
+                int address = int.Parse(match.Groups["address"].Value, CultureInfo.InvariantCulture);
+                return prefix + (address + offset).ToString(CultureInfo.InvariantCulture);
+            }
+            return baseDevice;
         }
 
         /// <summary>

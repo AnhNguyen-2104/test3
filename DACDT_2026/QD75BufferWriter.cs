@@ -386,50 +386,35 @@ namespace DACDT_2026
                 return result;
             }
 
-            int chunkSize = 50;
-            for (int i = 0; i < rows.Count; i += chunkSize)
+            for (int i = 0; i < rows.Count; i++)
             {
-                int currentChunkSize = Math.Min(chunkSize, rows.Count - i);
-                int totalWords = currentChunkSize * Stride;
-                short[] bulkData = new short[totalWords];
+                var row = rows[i];
+                int pointAddress = slaveBaseG + i * Stride;
 
-                for (int j = 0; j < currentChunkSize; j++)
+                // Với trục Slave (Trục 2), ta CHỈ ghi đè địa chỉ đích (Word 6-7) và tâm cung (Word 8-9)
+                // để tránh làm hỏng cấu hình của trục 2.
+                
+                int endY = 0;
+                if (TryParseCoordinateY(row.EndCoordinate, out endY))
                 {
-                    var row = rows[i + j];
-                    int blockOffset = j * Stride;
-
-                    int endY = 0;
-                    if (TryParseCoordinateY(row.EndCoordinate, out endY))
-                    {
-                        bulkData[blockOffset + OffsetPosX] = (short)(endY & 0xFFFF);
-                        bulkData[blockOffset + OffsetPosX + 1] = (short)((endY >> 16) & 0xFFFF);
-                    }
-
-                    int centerY = 0;
-                    if (TryParseCoordinateY(row.CenterCoordinate, out centerY))
-                    {
-                        bulkData[blockOffset + OffsetCenterX] = (short)(centerY & 0xFFFF);
-                        bulkData[blockOffset + OffsetCenterX + 1] = (short)((centerY >> 16) & 0xFFFF);
-                    }
+                    short[] posData = new short[2];
+                    posData[0] = (short)(endY & 0xFFFF);
+                    posData[1] = (short)((endY >> 16) & 0xFFFF);
+                    plcComm.WriteBuffer(0, pointAddress + OffsetPosX, posData);
                 }
 
-                try
+                int centerY = 0;
+                if (TryParseCoordinateY(row.CenterCoordinate, out centerY))
                 {
-                    int chunkBaseG = slaveBaseG + i * Stride;
-                    int res = plcComm.WriteBuffer(0, chunkBaseG, bulkData);
-                    if (res != 0)
-                    {
-                        result.Success = false;
-                        result.ErrorMessage = $"Slave WriteBuffer failed at point {i + 1} with error code: {res}";
-                        return result;
-                    }
-                    progressCallback?.Invoke(i + currentChunkSize, rows.Count);
+                    short[] arcData = new short[2];
+                    arcData[0] = (short)(centerY & 0xFFFF);
+                    arcData[1] = (short)((centerY >> 16) & 0xFFFF);
+                    plcComm.WriteBuffer(0, pointAddress + OffsetCenterX, arcData);
                 }
-                catch (Exception ex)
+
+                if ((i + 1) % 10 == 0 || (i + 1) == rows.Count)
                 {
-                    result.Success = false;
-                    result.ErrorMessage = ex.Message;
-                    return result;
+                    progressCallback?.Invoke(i + 1, rows.Count);
                 }
             }
 
@@ -561,64 +546,65 @@ namespace DACDT_2026
             }
 
             int baseG = ProgramBaseG[axisIndex];
-            int chunkSize = 50; 
 
-            for (int i = 0; i < rows.Count; i += chunkSize)
+            // Ghi từng điểm một (10 words/điểm) để đảm bảo tính đúng đắn và có thể báo tiến trình
+            for (int i = 0; i < rows.Count; i++)
             {
-                int currentChunkSize = Math.Min(chunkSize, rows.Count - i);
-                int totalWords = currentChunkSize * Stride;
-                short[] bulkData = new short[totalWords];
+                var row = rows[i];
+                short[] pointData = new short[Stride]; // 10 words
 
-                for (int j = 0; j < currentChunkSize; j++)
+                // 1. Positioning Identifier (Da.1-Da.5 packed into Word 0)
+                pointData[OffsetMoveCode] = BuildPositioningIdentifierWord(row.MotionType);
+
+                // 2. M Code (Word 1)
+                pointData[OffsetMCode] = (short)ParseInt(row.MCodeValue);
+
+                // 3. Dwell Time (Word 2)
+                pointData[OffsetDwell] = (short)ParseInt(row.Dwell);
+
+                // 4. Command Speed (Word 4-5, 32-bit)
+                int speedVal = ParseInt(row.Speed) * SpeedMultiplier;
+                pointData[OffsetSpeed]     = (short)(speedVal & 0xFFFF);
+                pointData[OffsetSpeed + 1] = (short)((speedVal >> 16) & 0xFFFF);
+
+                // 5. Positioning Address (Word 6-7, 32-bit)
+                int endX = 0;
+                if (TryParseCoordinateX(row.EndCoordinate, out endX))
                 {
-                    var row = rows[i + j];
-                    int blockOffset = j * Stride;
+                    pointData[OffsetPosX]     = (short)(endX & 0xFFFF);
+                    pointData[OffsetPosX + 1] = (short)((endX >> 16) & 0xFFFF);
+                }
 
-                    short moveCode = BuildPositioningIdentifierWord(row.MotionType);
-                    bulkData[blockOffset + OffsetMoveCode] = moveCode;
-
-                    int mcodeVal = ParseInt(row.MCodeValue);
-                    bulkData[blockOffset + OffsetMCode] = (short)mcodeVal;
-
-                    int dwellVal = ParseInt(row.Dwell);
-                    bulkData[blockOffset + OffsetDwell] = (short)dwellVal;
-
-                    int speedVal = ParseInt(row.Speed) * SpeedMultiplier;
-                    bulkData[blockOffset + OffsetSpeed] = (short)(speedVal & 0xFFFF);
-                    bulkData[blockOffset + OffsetSpeed + 1] = (short)((speedVal >> 16) & 0xFFFF);
-
-                    int endX = 0;
-                    if (TryParseCoordinateX(row.EndCoordinate, out endX))
-                    {
-                        bulkData[blockOffset + OffsetPosX] = (short)(endX & 0xFFFF);
-                        bulkData[blockOffset + OffsetPosX + 1] = (short)((endX >> 16) & 0xFFFF);
-                    }
-
-                    int centerX = 0;
-                    if (TryParseCoordinateX(row.CenterCoordinate, out centerX))
-                    {
-                        bulkData[blockOffset + OffsetCenterX] = (short)(centerX & 0xFFFF);
-                        bulkData[blockOffset + OffsetCenterX + 1] = (short)((centerX >> 16) & 0xFFFF);
-                    }
+                // 6. Arc Address (Word 8-9, 32-bit)
+                int centerX = 0;
+                if (TryParseCoordinateX(row.CenterCoordinate, out centerX))
+                {
+                    pointData[OffsetCenterX]     = (short)(centerX & 0xFFFF);
+                    pointData[OffsetCenterX + 1] = (short)((centerX >> 16) & 0xFFFF);
                 }
 
                 try
                 {
-                    int chunkBaseG = baseG + i * Stride;
-                    int res = plcComm.WriteBuffer(0, chunkBaseG, bulkData);
+                    int pointAddress = baseG + i * Stride;
+                    int res = plcComm.WriteBuffer(0, pointAddress, pointData);
                     if (res != 0)
                     {
                         result.Success = false;
-                        result.ErrorMessage = $"WriteBuffer failed at point {i + 1} with error code: {res}";
+                        result.ErrorMessage = $"Lỗi ghi điểm {i + 1} tại G{pointAddress}: {res}";
                         return result;
                     }
-                    progressCallback?.Invoke(i + currentChunkSize, rows.Count);
                 }
                 catch (Exception ex)
                 {
                     result.Success = false;
                     result.ErrorMessage = ex.Message;
                     return result;
+                }
+
+                // Cập nhật tiến trình sau mỗi 10 điểm hoặc điểm cuối
+                if ((i + 1) % 10 == 0 || (i + 1) == rows.Count)
+                {
+                    progressCallback?.Invoke(i + 1, rows.Count);
                 }
             }
 
