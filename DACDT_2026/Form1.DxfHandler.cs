@@ -413,21 +413,24 @@ namespace DACDT_2026
 
             // Map ProcessRow → QD75BufferWriter.PositioningDataRow (tọa độ đã cộng offset)
             var dataRows = new List<QD75BufferWriter.PositioningDataRow>();
-            string lastSpeed = globalSpeed; // fallback to globalSpeed if no F at all
+            string lastSpeed = globalSpeed;
 
             foreach (var row in processRows)
             {
+                if (string.IsNullOrWhiteSpace(row.EndCoordinate))
+                    continue;
+
                 string effectiveSpeed = lastSpeed;
                 if (!string.IsNullOrEmpty(row.Speed))
                 {
-                    if (int.TryParse(row.Speed, out int s) && s > 0)
+                    if (double.TryParse(row.Speed, NumberStyles.Any, CultureInfo.InvariantCulture, out double spd) && spd > 0)
                     {
                         lastSpeed = row.Speed;
                         effectiveSpeed = row.Speed;
                     }
                 }
 
-                dataRows.Add(new QD75BufferWriter.PositioningDataRow
+                var plcRow = new QD75BufferWriter.PositioningDataRow
                 {
                     MotionType       = row.MotionType,
                     MCodeValue       = row.MCodeValue,
@@ -435,7 +438,16 @@ namespace DACDT_2026
                     Speed            = effectiveSpeed,
                     EndCoordinate    = ApplyOffsetToCoordSend(row.EndCoordinate,    offsetX, offsetY),
                     CenterCoordinate = ApplyOffsetToCoordSend(row.CenterCoordinate, offsetX, offsetY)
-                });
+                };
+
+                if (QD75BufferWriter.IsValidPositioningRow(plcRow))
+                    dataRows.Add(plcRow);
+            }
+
+            if (dataRows.Count == 0)
+            {
+                await NotifyAsync("info", "Telemetry", "No valid positioning points (need EndCoordinate X;Y).");
+                return;
             }
 
             // ── Tạm dừng poll timer để tránh ContextSwitchDeadlock ──────────────────
@@ -458,7 +470,9 @@ namespace DACDT_2026
                     return;
                 }
 
-                // ── BƯỚC 2: Slave axis (Axis 2 / Y): nạp toạ độ vào bộ đệm (G8006+) ──────
+                LogBufferDebugRows(sendResult);
+
+                // ── BƯỚC 2: Slave axis (Axis 2 / Y): nạp toạ độ vào bộ đệm (G8000+) ──────
                 Action<int, int> progressCbY = (current, total) => 
                 {
                     _ = PostToUiAsync("updateSendProgress", new { axis = "Y", current, total });
@@ -471,6 +485,8 @@ namespace DACDT_2026
                     await NotifyAsync("error", "Telemetry [Axis2]", $"Failed to load Axis 2 buffer: {slaveResult.ErrorMessage}");
                     return;
                 }
+
+                LogBufferDebugRows(slaveResult);
 
                 // Không tự động ghi Start No. vào G1500 nữa.
                 // Người dùng sẽ nhấn nút "START ACTION (M2000)" trên giao diện để kích hoạt chạy máy.
@@ -839,6 +855,17 @@ namespace DACDT_2026
         /// Cộng offsetX / offsetY vào chuỗi toạ độ "X;Y" trước khi gửi PLC.
         /// Nếu chuỗi rỗng hoặc offset = 0 thì trả về giá trị gốc.
         /// </summary>
+        private void LogBufferDebugRows(QD75BufferWriter.SendResult sendResult)
+        {
+            if (sendResult?.WriteResults == null) return;
+            foreach (var wr in sendResult.WriteResults)
+            {
+                if (!string.Equals(wr.Status, "Debug", StringComparison.OrdinalIgnoreCase))
+                    continue;
+                AddLogEntry("PLC", wr.Address ?? string.Empty, "Debug", wr.Status, wr.Message ?? string.Empty);
+            }
+        }
+
         private static string ApplyOffsetToCoordSend(string coord, double ox, double oy)
         {
             if (string.IsNullOrWhiteSpace(coord)) return coord ?? string.Empty;

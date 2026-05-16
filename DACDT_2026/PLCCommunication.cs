@@ -279,25 +279,8 @@ namespace DACDT_2026
         {
             if (!isConnected) throw new InvalidOperationException("Chưa kết nối PLC");
             if (data == null || data.Length == 0) throw new ArgumentException("Khong co du lieu de ghi.", nameof(data));
-            
-            lock (commLock)
-            {
-                try
-                {
-                    // Với mảng nhỏ (như 1 điểm = 10 words), ta có thể ghi từng word để đảm bảo tính đúng đắn 100%
-                    // tránh các lỗi marshaling bộ nhớ của dynamic COM.
-                    for (int i = 0; i < data.Length; i++)
-                    {
-                        int res = plcDevice.WriteBuffer(startIO, address + i, 1, ref data[i]);
-                        if (res != 0) return res;
-                    }
-                    return 0;
-                }
-                catch (Exception ex)
-                {
-                    throw new Exception($"Lỗi WriteBuffer: {GetInnermostMessage(ex)}");
-                }
-            }
+
+            return WriteBufferBlock(startIO, address, data, 0, data.Length);
         }
 
         public int WriteBufferBlock(int startIO, int address, short[] data, int offset, int count)
@@ -318,17 +301,9 @@ namespace DACDT_2026
                         int currentOffset = offset + written;
                         int currentAddress = address + written;
 
-                        // COM WriteBuffer cần ref phần tử đầu của mảng liên tục — ref data[i] giữa mảng
-                        // với dynamic COM chỉ marshal 1 word → dữ liệu từ điểm 2 trở đi lệch (G2010+).
-                        short[] chunk = new short[blockCount];
-                        Array.Copy(data, currentOffset, chunk, 0, blockCount);
-
-                        int result = plcDevice.WriteBuffer(startIO, currentAddress, blockCount, ref chunk[0]);
+                        int result = TryWriteBufferChunk(startIO, currentAddress, data, currentOffset, blockCount);
                         if (result != 0)
-                        {
-                            result = WriteBufferWordsLocked(startIO, currentAddress, chunk, 0, blockCount);
-                            if (result != 0) return result;
-                        }
+                            return result;
 
                         written += blockCount;
                     }
@@ -342,11 +317,52 @@ namespace DACDT_2026
             }
         }
 
+        /// <summary>
+        /// MX Component WriteBuffer qua dynamic COM: marshal short[] dễ lệch.
+        /// Thử int[] (lower 16-bit) trước, sau đó short[] liên tục, cuối cùng ghi từng word.
+        /// </summary>
+        private int TryWriteBufferChunk(int startIO, int address, short[] data, int offset, int count)
+        {
+            int[] intChunk = WordsToIntBuffer(data, offset, count);
+            try
+            {
+                int result = plcDevice.WriteBuffer(startIO, address, count, ref intChunk[0]);
+                if (result == 0) return 0;
+            }
+            catch
+            {
+                // thử kiểu short[] liên tục
+            }
+
+            short[] shortChunk = new short[count];
+            Array.Copy(data, offset, shortChunk, 0, count);
+            try
+            {
+                int result = plcDevice.WriteBuffer(startIO, address, count, ref shortChunk[0]);
+                if (result == 0) return 0;
+            }
+            catch
+            {
+                // fallback từng word
+            }
+
+            return WriteBufferWordsLocked(startIO, address, data, offset, count);
+        }
+
+        private static int[] WordsToIntBuffer(short[] data, int offset, int count)
+        {
+            int[] buf = new int[count];
+            for (int i = 0; i < count; i++)
+                buf[i] = data[offset + i];
+            return buf;
+        }
+
         private int WriteBufferWordsLocked(int startIO, int address, short[] data, int offset, int count)
         {
             for (int i = 0; i < count; i++)
             {
-                int res = plcDevice.WriteBuffer(startIO, address + i, 1, ref data[offset + i]);
+                int[] one = { data[offset + i] };
+                int res = plcDevice.WriteBuffer(startIO, address + i, 1, ref one[0]);
                 if (res != 0) return res;
             }
             return 0;

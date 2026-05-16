@@ -144,6 +144,48 @@ namespace DACDT_2026
             return 0;
         }
 
+        private static int ParseSpeedPlcUnits(string value)
+        {
+            if (string.IsNullOrWhiteSpace(value)) return 0;
+            if (int.TryParse(value, NumberStyles.Any, CultureInfo.InvariantCulture, out int i))
+                return i * SpeedMultiplier;
+            if (double.TryParse(value, NumberStyles.Any, CultureInfo.InvariantCulture, out double d))
+                return Convert.ToInt32(Math.Round(d * SpeedMultiplier));
+            return 0;
+        }
+
+        /// <summary>Chỉ ghi dòng có toạ độ X;Y hợp lệ (bỏ dòng cấu hình / trống).</summary>
+        public static bool IsValidPositioningRow(PositioningDataRow row)
+        {
+            if (row == null || string.IsNullOrWhiteSpace(row.EndCoordinate)) return false;
+            int x, y;
+            return TryParseCoordinateX(row.EndCoordinate, out x)
+                && TryParseCoordinateY(row.EndCoordinate, out y);
+        }
+
+        public static List<PositioningDataRow> FilterPositioningRows(IEnumerable<PositioningDataRow> rows)
+        {
+            var list = new List<PositioningDataRow>();
+            if (rows == null) return list;
+            foreach (var row in rows)
+            {
+                if (IsValidPositioningRow(row))
+                    list.Add(row);
+            }
+            return list;
+        }
+
+        /// <summary>Chuỗi hex 10 word để đối chiếu GX Works (địa chỉ G tuyệt đối).</summary>
+        public static string FormatPointWordsHex(short[] words, int pointIndex, int baseG)
+        {
+            if (words == null || words.Length < (pointIndex + 1) * Stride) return string.Empty;
+            int baseIndex = pointIndex * Stride;
+            var parts = new string[Stride];
+            for (int w = 0; w < Stride; w++)
+                parts[w] = $"G{baseG + baseIndex + w}:{(ushort)words[baseIndex + w]:X4}";
+            return string.Join(" ", parts);
+        }
+
         private static bool TryParseCoordinateX(string coordinate, out int scaledX)
         {
             scaledX = 0;
@@ -225,7 +267,7 @@ namespace DACDT_2026
                             pointData[OffsetDwell] = (short)ParseInt(row.Dwell);
                             pointData[OffsetReserved] = 0;
 
-                            int speedVal = ParseInt(row.Speed) * SpeedMultiplier;
+                            int speedVal = ParseSpeedPlcUnits(row.Speed);
                             pointData[OffsetSpeed] = (short)(speedVal & 0xFFFF);
                             pointData[OffsetSpeed + 1] = (short)((speedVal >> 16) & 0xFFFF);
 
@@ -432,6 +474,17 @@ namespace DACDT_2026
 
             try
             {
+                if (pointCount > 0)
+                {
+                    result.WriteResults.Add(new WriteResult
+                    {
+                        Address = $"U0\\G{baseG}",
+                        Status = "Debug",
+                        Message = "Pt0 " + FormatPointWordsHex(allWords, 0, baseG)
+                            + (pointCount > 1 ? " | Pt1 " + FormatPointWordsHex(allWords, 1, baseG) : string.Empty)
+                    });
+                }
+
                 int maxRowsPerWrite = Math.Max(1, MaxWordsPerPlcWrite / Stride);
 
                 for (int rowOffset = 0; rowOffset < pointCount; rowOffset += maxRowsPerWrite)
@@ -445,7 +498,8 @@ namespace DACDT_2026
                     if (res != 0)
                     {
                         result.Success = false;
-                        result.ErrorMessage = $"Axis {axisNumber}: WriteBufferBlock failed at U0\\G{address} ({wordCount} words), code {res}";
+                        result.ErrorMessage = $"Axis {axisNumber}: WriteBufferBlock failed at U0\\G{address} ({wordCount} words), code {res}. "
+                            + FormatPointWordsHex(allWords, rowOffset, baseG);
                         return result;
                     }
 
@@ -475,8 +529,8 @@ namespace DACDT_2026
         private static short[] BuildMasterAxisWords(List<PositioningDataRow> rows)
         {
             short[] words = new short[rows.Count * Stride];
-            Parallel.For(0, rows.Count, i =>
-                FillPositioningPointWords(words, i * Stride, rows[i], partnerAxis: 1, useYAxis: false));
+            for (int i = 0; i < rows.Count; i++)
+                FillPositioningPointWords(words, i * Stride, rows[i], partnerAxis: 1, useYAxis: false);
             return words;
         }
 
@@ -484,8 +538,8 @@ namespace DACDT_2026
         private static short[] BuildSlaveAxisWords(List<PositioningDataRow> rows)
         {
             short[] words = new short[rows.Count * Stride];
-            Parallel.For(0, rows.Count, i =>
-                FillPositioningPointWords(words, i * Stride, rows[i], partnerAxis: 0, useYAxis: true));
+            for (int i = 0; i < rows.Count; i++)
+                FillPositioningPointWords(words, i * Stride, rows[i], partnerAxis: 0, useYAxis: true);
             return words;
         }
 
@@ -496,12 +550,14 @@ namespace DACDT_2026
             int partnerAxis,
             bool useYAxis)
         {
+            Array.Clear(words, baseIndex, Stride);
+
             words[baseIndex + OffsetMoveCode] = BuildPositioningIdentifierWord(row.MotionType, partnerAxis);
             words[baseIndex + OffsetMCode] = (short)ParseInt(row.MCodeValue);
             words[baseIndex + OffsetDwell] = (short)ParseInt(row.Dwell);
             words[baseIndex + OffsetReserved] = 0;
 
-            int speedVal = ParseInt(row.Speed) * SpeedMultiplier;
+            int speedVal = ParseSpeedPlcUnits(row.Speed);
             WriteInt32Words(words, baseIndex + OffsetSpeed, speedVal);
 
             if (useYAxis)
