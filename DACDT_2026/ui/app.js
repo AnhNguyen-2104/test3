@@ -437,11 +437,7 @@ function renderProcessTable() {
   dom.processBody.innerHTML = rows.map((r, i) => {
     const endDisp   = r.endCoordinateDisplay   || r.endCoordinate   || "";
     const centDisp  = r.centerCoordinateDisplay || r.centerCoordinate || "";
-    const endRaw    = r.endCoordinate    || "";
-    const centRaw   = r.centerCoordinate || "";
-    const offClass  = (endDisp !== endRaw && endRaw !== "") ? " style='color:var(--accent-2,#a78bfa);font-weight:600'" : "";
-    const offCClass = (centDisp !== centRaw && centRaw !== "") ? " style='color:var(--accent-2,#a78bfa);font-weight:600'" : "";
-    return `<tr data-process-index="${i}"><td>${esc(r.motionType || "")}</td><td><input type="text" class="text-input compact" style="margin:0;width:100%;min-width:80px" data-process-index="${i}" data-process-field="mcode" value="${esc(r.mCodeValue || "")}"></td><td><input type="text" class="text-input compact" style="margin:0;width:100%;min-width:60px" data-process-index="${i}" data-process-field="dwell" value="${esc(r.dwell || "")}"></td><td><input type="text" class="text-input compact" style="margin:0;width:100%;min-width:60px" data-process-index="${i}" data-process-field="speed" value="${esc(r.speed || "")}"></td><td>${esc(endRaw)}</td><td>${esc(centRaw)}</td><td${offClass}>${esc(endDisp)}</td><td${offCClass}>${esc(centDisp)}</td></tr>`;
+    return `<tr data-process-index="${i}"><td>${esc(r.motionType || "")}</td><td><input type="text" class="text-input compact" style="margin:0;width:100%;min-width:80px" data-process-index="${i}" data-process-field="mcode" value="${esc(r.mCodeValue || "")}"></td><td><input type="text" class="text-input compact" style="margin:0;width:100%;min-width:60px" data-process-index="${i}" data-process-field="dwell" value="${esc(r.dwell || "")}"></td><td><input type="text" class="text-input compact" style="margin:0;width:100%;min-width:60px" data-process-index="${i}" data-process-field="speed" value="${esc(r.speed || "")}"></td><td>${esc(endDisp)}</td><td>${esc(centDisp)}</td></tr>`;
   }).join("");
 }
 
@@ -455,7 +451,31 @@ function renderCadPreview() {
   const polyM = primitives.map(pr => { const pa = (pr.points || []).map(p => { const pp = proj(p); return `${pp.x.toFixed(2)},${pp.y.toFixed(2)}`; }).join(" "); return `<polyline class="cad-line" points="${pa}"></polyline>`; }).join("");
   const ptM = points.map(p => { const pp = proj(p); const sel = p.key === state.dxf.selectedPointKey ? "is-selected" : ""; return `<circle class="cad-point ${sel}" cx="${pp.x.toFixed(2)}" cy="${pp.y.toFixed(2)}" r="4.8" data-point-key="${esc(p.key || "")}"></circle>`; }).join("");
   const aM = Object.entries(state.dxf.assignedPointKeys || {}).map(([slot, key]) => { const p = points.find(i => i.key === key); if (!p) return ""; const pp = proj(p); const t = getAssignmentTone(slot); return `<circle cx="${pp.x.toFixed(2)}" cy="${pp.y.toFixed(2)}" r="10.5" fill="${t.fill}" stroke="white" stroke-width="1.8"></circle><text class="cad-assignment-text" x="${pp.x.toFixed(2)}" y="${pp.y.toFixed(2)}">${t.label}</text>`; }).join("");
-  dom.cadPreview.innerHTML = `<g id="cad-transform-group" transform="translate(${cadPanX},${cadPanY}) scale(${cadZoom})"><g>${polyM}</g><g>${ptM}</g><g>${aM}</g></g>`;
+  
+  const p0 = proj({x: 0, y: 0});
+  const px = proj({x: 170, y: 0});
+  const py = proj({x: 0, y: 170});
+  const pxy = proj({x: 170, y: 170});
+
+  const originMarker = `<g class="cad-workspace-limit">
+    <!-- Vùng giới hạn 170x170 -->
+    <polygon points="${p0.x.toFixed(2)},${p0.y.toFixed(2)} ${px.x.toFixed(2)},${px.y.toFixed(2)} ${pxy.x.toFixed(2)},${pxy.y.toFixed(2)} ${py.x.toFixed(2)},${py.y.toFixed(2)}" fill="rgba(255, 255, 255, 0.05)" stroke="rgba(50, 200, 255, 0.5)" stroke-width="1.5" stroke-dasharray="6,4" />
+    
+    <!-- Các đường gióng nằm gọn trong khung giới hạn -->
+    <line x1="-10000" y1="${p0.y.toFixed(2)}" x2="10000" y2="${p0.y.toFixed(2)}" stroke="rgba(255, 50, 50, 0.4)" stroke-width="1.5" stroke-dasharray="6,4" />
+    <line x1="${p0.x.toFixed(2)}" y1="-10000" x2="${p0.x.toFixed(2)}" y2="10000" stroke="rgba(50, 255, 50, 0.4)" stroke-width="1.5" stroke-dasharray="6,4" />
+    
+    <!-- Mũi tên trục X tại 170 -->
+    <polygon points="${px.x.toFixed(2)},${px.y.toFixed(2)} ${(px.x - 10).toFixed(2)},${(px.y - 5).toFixed(2)} ${(px.x - 10).toFixed(2)},${(px.y + 5).toFixed(2)}" fill="rgba(255, 50, 50, 0.8)" />
+    <!-- Mũi tên trục Y tại 170 (chú ý toạ độ Y trên màn hình lộn ngược) -->
+    <polygon points="${py.x.toFixed(2)},${py.y.toFixed(2)} ${(py.x - 5).toFixed(2)},${(py.y + 10).toFixed(2)} ${(py.x + 5).toFixed(2)},${(py.y + 10).toFixed(2)}" fill="rgba(50, 255, 50, 0.8)" />
+
+    <!-- Điểm gốc và Text -->
+    <circle cx="${p0.x.toFixed(2)}" cy="${p0.y.toFixed(2)}" r="5" fill="none" stroke="yellow" stroke-width="2"/>
+    <text x="${p0.x + 8}" y="${p0.y - 8}" fill="yellow" font-size="12" font-family="monospace">X0, Y0</text>
+  </g>`;
+
+  dom.cadPreview.innerHTML = `<g id="cad-transform-group" transform="translate(${cadPanX},${cadPanY}) scale(${cadZoom})">${originMarker}<g>${polyM}</g><g>${ptM}</g><g>${aM}</g></g>`;
 }
 
 function renderTelemetry() {
