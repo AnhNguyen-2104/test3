@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Threading.Tasks;
 
 namespace DACDT_2026
 {
@@ -132,52 +133,14 @@ namespace DACDT_2026
             return unchecked((short)wordValue);
         }
 
-
-        /// <summary>
-        /// Write a 16-bit value to a U0\G address via PLCCommunication.
-        /// </summary>
-        private static WriteResult Write16(PLCCommunication plcComm, int gAddress, short value, string label)
+        private static int ParseInt(string value)
         {
-            string devicePath = $"U0\\G{gAddress}";
-            string usedMethod;
-            int result = plcComm.WriteInt16ToDevicePath(devicePath, value, out usedMethod);
-            return new WriteResult
-            {
-                Address = devicePath,
-                Value = value.ToString(CultureInfo.InvariantCulture),
-                Status = result == 0 ? "OK" : $"Error({result})",
-                Message = $"{label}: {usedMethod}"
-            };
+            if (string.IsNullOrWhiteSpace(value)) return 0;
+            if (int.TryParse(value, NumberStyles.Any, CultureInfo.InvariantCulture, out int result))
+                return result;
+            return 0;
         }
 
-        /// <summary>
-        /// Write a 32-bit value to two consecutive U0\G addresses (Low word, High word).
-        /// Uses individual 16-bit writes to avoid COM marshaling issues with WriteBuffer.
-        /// </summary>
-        private static WriteResult Write32(PLCCommunication plcComm, int gAddress, int value, string label)
-        {
-            short lowWord = (short)(value & 0xFFFF);
-            short highWord = (short)((value >> 16) & 0xFFFF);
-            string deviceL = $"U0\\G{gAddress}";
-            string deviceH = $"U0\\G{gAddress + 1}";
-
-            string usedL, usedH;
-            int rL = plcComm.WriteInt16ToDevicePath(deviceL, lowWord, out usedL);
-            int rH = plcComm.WriteInt16ToDevicePath(deviceH, highWord, out usedH);
-
-            bool ok = (rL == 0 && rH == 0);
-            return new WriteResult
-            {
-                Address = deviceL,
-                Value = $"{value} (L={lowWord},H={highWord})",
-                Status = ok ? "OK" : $"Error(L={rL},H={rH})",
-                Message = $"{label} 32-bit"
-            };
-        }
-
-        /// <summary>
-        /// Parse coordinate string "X;Y" and return X component multiplied by CoordinateMultiplier.
-        /// </summary>
         private static bool TryParseCoordinateX(string coordinate, out int scaledX)
         {
             scaledX = 0;
@@ -191,240 +154,6 @@ namespace DACDT_2026
             return false;
         }
 
-        /// <summary>
-        /// Parse a string to int, return 0 if invalid.
-        /// </summary>
-        private static int ParseInt(string value)
-        {
-            if (string.IsNullOrWhiteSpace(value)) return 0;
-            int result;
-            if (int.TryParse(value, NumberStyles.Any, CultureInfo.InvariantCulture, out result))
-                return result;
-            return 0;
-        }
-
-        /// <summary>
-        /// Send all positioning data rows to PLC buffer memory for a given axis.
-        /// This is the core buffer write logic extracted from HandleSendCadXAsync.
-        /// </summary>
-        /// <param name="plcComm">Connected PLCCommunication instance.</param>
-        /// <param name="axisIndex">Axis index (0=X, 1=Y, 2=Z, 3=A).</param>
-        /// <param name="rows">List of positioning data rows to write.</param>
-        /// <param name="writeStartNo">If true, write 1 to the Control Start No. register after all data.</param>
-        /// <returns>SendResult with all write results and overall success status.</returns>
-        public static SendResult WritePositioningData(PLCCommunication plcComm, int axisIndex, List<PositioningDataRow> rows, bool writeStartNo = true)
-        {
-            var result = new SendResult { Success = true };
-
-            if (plcComm == null || !plcComm.IsConnected)
-            {
-                result.Success = false;
-                result.ErrorMessage = "PLC is not connected.";
-                return result;
-            }
-
-            if (rows == null || rows.Count == 0)
-            {
-                result.Success = false;
-                result.ErrorMessage = "No points to send.";
-                return result;
-            }
-
-            int baseG = ProgramBaseG[axisIndex];
-            int n = 1;
-
-            foreach (var row in rows)
-            {
-                // Parse coordinates
-                int endX = 0;
-                int centerX = 0;
-                bool hasEnd = TryParseCoordinateX(row.EndCoordinate, out endX);
-                bool hasCenter = TryParseCoordinateX(row.CenterCoordinate, out centerX);
-
-                // Parse M code, dwell, speed
-                int mcodeVal = ParseInt(row.MCodeValue);
-                int dwellVal = ParseInt(row.Dwell);
-                int speedVal = ParseInt(row.Speed) * SpeedMultiplier;
-
-                // Validate 16-bit ranges
-                if (mcodeVal < short.MinValue || mcodeVal > short.MaxValue)
-                {
-                    result.WriteResults.Add(new WriteResult
-                    {
-                        Address = $"Point {n}",
-                        Value = mcodeVal.ToString(),
-                        Status = "Error",
-                        Message = $"M code out of 16-bit range: {mcodeVal}"
-                    });
-                    n++;
-                    continue;
-                }
-                if (dwellVal < short.MinValue || dwellVal > short.MaxValue)
-                {
-                    result.WriteResults.Add(new WriteResult
-                    {
-                        Address = $"Point {n}",
-                        Value = dwellVal.ToString(),
-                        Status = "Error",
-                        Message = $"Dwell out of 16-bit range: {dwellVal}"
-                    });
-                    n++;
-                    continue;
-                }
-
-                short moveCode = BuildPositioningIdentifierWord(row.MotionType);
-                int blockBase = baseG + (n - 1) * Stride;
-
-                try
-                {
-                    // Write Positioning identifier (16-bit)
-                    var rMove = Write16(plcComm, blockBase + OffsetMoveCode, moveCode,
-                        $"Posn identifier hex=0x{((ushort)moveCode):X4}");
-                    result.WriteResults.Add(rMove);
-
-                    // Write M code (16-bit)
-                    var rM = Write16(plcComm, blockBase + OffsetMCode, (short)mcodeVal, "MCode");
-                    result.WriteResults.Add(rM);
-
-                    // Write Dwell (16-bit)
-                    var rD = Write16(plcComm, blockBase + OffsetDwell, (short)dwellVal, "Dwell");
-                    result.WriteResults.Add(rD);
-
-                    // Write Speed (32-bit, two 16-bit words)
-                    var rS = Write32(plcComm, blockBase + OffsetSpeed, speedVal, "Speed");
-                    result.WriteResults.Add(rS);
-
-                    // Write Position X (32-bit, two 16-bit words)
-                    if (hasEnd)
-                    {
-                        var rP = Write32(plcComm, blockBase + OffsetPosX, endX, "PosX");
-                        result.WriteResults.Add(rP);
-                        if (!rP.Status.StartsWith("OK")) result.Success = false;
-                    }
-
-                    // Write Center X (32-bit, two 16-bit words)
-                    if (hasCenter)
-                    {
-                        var rC = Write32(plcComm, blockBase + OffsetCenterX, centerX, "CenterX");
-                        result.WriteResults.Add(rC);
-                        if (!rC.Status.StartsWith("OK")) result.Success = false;
-                    }
-                }
-                catch (Exception ex)
-                {
-                    result.WriteResults.Add(new WriteResult
-                    {
-                        Address = $"U0\\G{blockBase}",
-                        Value = string.Empty,
-                        Status = "Error",
-                        Message = ex.Message
-                    });
-                    result.Success = false;
-                }
-
-                n++;
-            }
-
-            // Write Start No. = 1 to Control base register
-            if (writeStartNo)
-            {
-                try
-                {
-                    string startDevice = $"U0\\G{ControlBaseG[axisIndex]}";
-                    string usedStart;
-                    int rStart = plcComm.WriteInt16ToDevicePath(startDevice, 1, out usedStart);
-                    result.WriteResults.Add(new WriteResult
-                    {
-                        Address = startDevice,
-                        Value = "1",
-                        Status = rStart == 0 ? "OK" : $"Error({rStart})",
-                        Message = "Start Axis " + (axisIndex + 1) + ": " + usedStart
-                    });
-                }
-                catch (Exception ex)
-                {
-                    result.WriteResults.Add(new WriteResult
-                    {
-                        Address = $"U0\\G{ControlBaseG[axisIndex]}",
-                        Value = "1",
-                        Status = "Error",
-                        Message = ex.Message
-                    });
-                    result.Success = false;
-                }
-            }
-
-            return result;
-        }
-
-        /// <summary>
-        /// Write positioning data for a SLAVE (interpolated follower) axis (Axis 2).
-        /// Per QD75 manual: only Da.6 (positioning address) and Da.7 (arc address) are required.
-        /// Da.1~Da.5 (identifier), Da.8 (speed), Da.9 (dwell) are all ignored by the module.
-        /// Base address is fixed at G8000 (Axis 2 slave buffer), stride = 10 words/point.
-        /// Same coordinate scaling as master axis (× CoordinateMultiplier = ×10000).
-        /// </summary>
-        /// <param name="plcComm">Connected PLCCommunication instance.</param>
-        /// <param name="rows">List of positioning data rows. Only EndCoordinate (Y axis) and CenterCoordinate (Y) are used.</param>
-        /// <param name="slaveBaseG">Buffer base address for slave axis. Default = 8000 (Axis 2).</param>
-        /// <returns>SendResult with all write results.</returns>
-        public static SendResult WriteSlaveAxisDataBulk(PLCCommunication plcComm, List<PositioningDataRow> rows, int slaveBaseG = 8000, Action<int, int> progressCallback = null)
-        {
-            var result = new SendResult { Success = true };
-
-            if (plcComm == null || !plcComm.IsConnected)
-            {
-                result.Success = false;
-                result.ErrorMessage = "PLC is not connected.";
-                return result;
-            }
-
-            if (rows == null || rows.Count == 0)
-            {
-                result.Success = false;
-                result.ErrorMessage = "No points to send.";
-                return result;
-            }
-
-            for (int i = 0; i < rows.Count; i++)
-            {
-                var row = rows[i];
-                int pointAddress = slaveBaseG + i * Stride;
-
-                // Với trục Slave (Trục 2), ta CHỈ ghi đè địa chỉ đích (Word 6-7) và tâm cung (Word 8-9)
-                // để tránh làm hỏng cấu hình của trục 2.
-                
-                int endY = 0;
-                if (TryParseCoordinateY(row.EndCoordinate, out endY))
-                {
-                    short[] posData = new short[2];
-                    posData[0] = (short)(endY & 0xFFFF);
-                    posData[1] = (short)((endY >> 16) & 0xFFFF);
-                    plcComm.WriteBuffer(0, pointAddress + OffsetPosX, posData);
-                }
-
-                int centerY = 0;
-                if (TryParseCoordinateY(row.CenterCoordinate, out centerY))
-                {
-                    short[] arcData = new short[2];
-                    arcData[0] = (short)(centerY & 0xFFFF);
-                    arcData[1] = (short)((centerY >> 16) & 0xFFFF);
-                    plcComm.WriteBuffer(0, pointAddress + OffsetCenterX, arcData);
-                }
-
-                if ((i + 1) % 10 == 0 || (i + 1) == rows.Count)
-                {
-                    progressCallback?.Invoke(i + 1, rows.Count);
-                }
-            }
-
-            return result;
-        }
-
-        /// <summary>
-        /// Parse coordinate string "X;Y" and return Y component multiplied by CoordinateMultiplier.
-        /// Used for slave axis where only the Y (second axis) coordinate matters.
-        /// </summary>
         private static bool TryParseCoordinateY(string coordinate, out int scaledY)
         {
             scaledY = 0;
@@ -438,69 +167,271 @@ namespace DACDT_2026
             return false;
         }
 
+        public static async Task<SendResult> WritePositioningDataBulkAsync(PLCCommunication plcComm, int axisIndex, List<PositioningDataRow> rows, bool writeStartNo = true, Action<int, int> progressCallback = null)
+        {
+            var finalResult = new SendResult { Success = true };
 
-        /// <summary>
-        /// Write a single 32-bit value to a device path and return a WriteResult.
-        /// Used for telemetry / manual buffer writes.
-        /// </summary>
+            if (plcComm == null || !plcComm.IsConnected)
+            {
+                finalResult.Success = false;
+                finalResult.ErrorMessage = "PLC is not connected.";
+                return finalResult;
+            }
+
+            if (rows == null || rows.Count == 0)
+            {
+                finalResult.Success = false;
+                finalResult.ErrorMessage = "No points to send.";
+                return finalResult;
+            }
+
+            int baseG = ProgramBaseG[axisIndex];
+            int numThreads = 4;
+            int chunkSize = (int)Math.Ceiling((double)rows.Count / numThreads);
+            var tasks = new List<Task<SendResult>>();
+            int completedPoints = 0;
+            object progressLock = new object();
+
+            for (int t = 0; t < numThreads; t++)
+            {
+                int startIdx = t * chunkSize;
+                if (startIdx >= rows.Count) break;
+
+                int count = Math.Min(chunkSize, rows.Count - startIdx);
+                var chunkRows = rows.GetRange(startIdx, count);
+
+                tasks.Add(Task.Run(() =>
+                {
+                    var result = new SendResult { Success = true };
+                    using (var localPlc = new PLCCommunication(plcComm.IPAddress, plcComm.Port, plcComm.LogicalStationNumber))
+                    {
+                        if (!localPlc.Connect())
+                        {
+                            result.Success = false;
+                            result.ErrorMessage = "Một luồng không thể kết nối tới PLC.";
+                            return result;
+                        }
+
+                        for (int i = 0; i < chunkRows.Count; i++)
+                        {
+                            var row = chunkRows[i];
+                            short[] pointData = new short[Stride];
+
+                            pointData[OffsetMoveCode] = BuildPositioningIdentifierWord(row.MotionType);
+                            pointData[OffsetMCode] = (short)ParseInt(row.MCodeValue);
+                            pointData[OffsetDwell] = (short)ParseInt(row.Dwell);
+
+                            int speedVal = ParseInt(row.Speed) * SpeedMultiplier;
+                            pointData[OffsetSpeed] = (short)(speedVal & 0xFFFF);
+                            pointData[OffsetSpeed + 1] = (short)((speedVal >> 16) & 0xFFFF);
+
+                            int endX = 0;
+                            if (TryParseCoordinateX(row.EndCoordinate, out endX))
+                            {
+                                pointData[OffsetPosX] = (short)(endX & 0xFFFF);
+                                pointData[OffsetPosX + 1] = (short)((endX >> 16) & 0xFFFF);
+                            }
+
+                            int centerX = 0;
+                            if (TryParseCoordinateX(row.CenterCoordinate, out centerX))
+                            {
+                                pointData[OffsetCenterX] = (short)(centerX & 0xFFFF);
+                                pointData[OffsetCenterX + 1] = (short)((centerX >> 16) & 0xFFFF);
+                            }
+
+                            try
+                            {
+                                int pointAddress = baseG + (startIdx + i) * Stride;
+                                int res = localPlc.WriteBuffer(0, pointAddress, pointData);
+                                if (res != 0)
+                                {
+                                    result.Success = false;
+                                    result.ErrorMessage = $"Lỗi ghi điểm {startIdx + i + 1} tại G{pointAddress}: {res}";
+                                    return result;
+                                }
+                            }
+                            catch (Exception ex)
+                            {
+                                result.Success = false;
+                                result.ErrorMessage = ex.Message;
+                                return result;
+                            }
+
+                            if (progressCallback != null)
+                            {
+                                lock (progressLock)
+                                {
+                                    completedPoints++;
+                                    if (completedPoints % 5 == 0 || completedPoints == rows.Count)
+                                    {
+                                        progressCallback(completedPoints, rows.Count);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    return result;
+                }));
+            }
+
+            var results = await Task.WhenAll(tasks);
+            foreach (var res in results)
+            {
+                if (!res.Success)
+                {
+                    finalResult.Success = false;
+                    finalResult.ErrorMessage = res.ErrorMessage;
+                    break;
+                }
+            }
+
+            return finalResult;
+        }
+
+        public static async Task<SendResult> WriteSlaveAxisDataBulkAsync(PLCCommunication plcComm, List<PositioningDataRow> rows, int slaveBaseG = 8000, Action<int, int> progressCallback = null)
+        {
+            var finalResult = new SendResult { Success = true };
+
+            if (plcComm == null || !plcComm.IsConnected)
+            {
+                finalResult.Success = false;
+                finalResult.ErrorMessage = "PLC is not connected.";
+                return finalResult;
+            }
+
+            if (rows == null || rows.Count == 0)
+            {
+                finalResult.Success = false;
+                finalResult.ErrorMessage = "No points to send.";
+                return finalResult;
+            }
+
+            int numThreads = 4;
+            int chunkSize = (int)Math.Ceiling((double)rows.Count / numThreads);
+            var tasks = new List<Task<SendResult>>();
+            int completedPoints = 0;
+            object progressLock = new object();
+
+            for (int t = 0; t < numThreads; t++)
+            {
+                int startIdx = t * chunkSize;
+                if (startIdx >= rows.Count) break;
+
+                int count = Math.Min(chunkSize, rows.Count - startIdx);
+                var chunkRows = rows.GetRange(startIdx, count);
+
+                tasks.Add(Task.Run(() =>
+                {
+                    var result = new SendResult { Success = true };
+                    using (var localPlc = new PLCCommunication(plcComm.IPAddress, plcComm.Port, plcComm.LogicalStationNumber))
+                    {
+                        if (!localPlc.Connect())
+                        {
+                            result.Success = false;
+                            result.ErrorMessage = "Một luồng không thể kết nối tới PLC.";
+                            return result;
+                        }
+
+                        for (int i = 0; i < chunkRows.Count; i++)
+                        {
+                            var row = chunkRows[i];
+                            int pointAddress = slaveBaseG + (startIdx + i) * Stride;
+
+                            int endY = 0;
+                            if (TryParseCoordinateY(row.EndCoordinate, out endY))
+                            {
+                                short[] posData = new short[2];
+                                posData[0] = (short)(endY & 0xFFFF);
+                                posData[1] = (short)((endY >> 16) & 0xFFFF);
+                                localPlc.WriteBuffer(0, pointAddress + OffsetPosX, posData);
+                            }
+
+                            int centerY = 0;
+                            if (TryParseCoordinateY(row.CenterCoordinate, out centerY))
+                            {
+                                short[] arcData = new short[2];
+                                arcData[0] = (short)(centerY & 0xFFFF);
+                                arcData[1] = (short)((centerY >> 16) & 0xFFFF);
+                                localPlc.WriteBuffer(0, pointAddress + OffsetCenterX, arcData);
+                            }
+
+                            if (progressCallback != null)
+                            {
+                                lock (progressLock)
+                                {
+                                    completedPoints++;
+                                    if (completedPoints % 5 == 0 || completedPoints == rows.Count)
+                                    {
+                                        progressCallback(completedPoints, rows.Count);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    return result;
+                }));
+            }
+
+            var results = await Task.WhenAll(tasks);
+            foreach (var res in results)
+            {
+                if (!res.Success)
+                {
+                    finalResult.Success = false;
+                    finalResult.ErrorMessage = res.ErrorMessage;
+                    break;
+                }
+            }
+
+            return finalResult;
+        }
+
+        public static WriteResult StartAxis(PLCCommunication plcComm, int axisIndex, int startNo)
+        {
+            if (plcComm == null || !plcComm.IsConnected)
+            {
+                return new WriteResult { Status = "Error", Message = "PLC not connected" };
+            }
+            try
+            {
+                string startDevice = $"U0\\G{ControlBaseG[axisIndex]}";
+                string used;
+                int result = plcComm.WriteInt16ToDevicePath(startDevice, (short)startNo, out used);
+                return new WriteResult
+                {
+                    Address = startDevice,
+                    Value   = startNo.ToString(),
+                    Status  = result == 0 ? "OK" : $"Error({result})",
+                    Message = $"Manual Start Axis {axisIndex + 1}: {used}"
+                }; 
+            }
+            catch (Exception ex)
+            {
+                return new WriteResult { Address = $"U0\\G{ControlBaseG[axisIndex]}", Status = "Error", Message = ex.Message };
+            }
+        }
+
         public static WriteResult WriteBufferValue(PLCCommunication plcComm, string path, int value)
         {
             if (plcComm == null || !plcComm.IsConnected)
             {
-                return new WriteResult
-                {
-                    Address = path,
-                    Value = value.ToString(CultureInfo.InvariantCulture),
-                    Status = "Error",
-                    Message = "PLC is not connected."
-                };
+                return new WriteResult { Address = path, Value = value.ToString(), Status = "Error", Message = "PLC not connected" };
             }
-
             try
             {
                 string used;
                 int result = plcComm.WriteInt32ToDevicePath(path, value, out used);
-                return new WriteResult
-                {
-                    Address = path,
-                    Value = value.ToString(CultureInfo.InvariantCulture),
-                    Status = result == 0 ? "OK" : $"Error({result})",
-                    Message = used
-                };
+                return new WriteResult { Address = path, Value = value.ToString(), Status = result == 0 ? "OK" : "Error", Message = used };
             }
             catch (Exception ex)
             {
-                return new WriteResult
-                {
-                    Address = path,
-                    Value = value.ToString(CultureInfo.InvariantCulture),
-                    Status = "Error",
-                    Message = ex.Message
-                };
+                return new WriteResult { Address = path, Status = "Error", Message = ex.Message };
             }
         }
 
-        /// <summary>
-        /// Convert raw buffer value to mm (Pr.1=0: raw × 10⁻¹ µm = raw/10000 mm)
-        /// </summary>
-        public static string FormatPositionMm(int rawValue)
-        {
-            double mm = rawValue / 10000.0;
-            return mm.ToString("0.0000", CultureInfo.InvariantCulture);
-        }
+        public static string FormatPositionMm(int rawValue) => (rawValue / 10000.0).ToString("0.0000", CultureInfo.InvariantCulture);
+        public static string FormatSpeedMm(int rawValue) => (rawValue / 100.0).ToString("0.00", CultureInfo.InvariantCulture);
 
-        /// <summary>
-        /// Format raw speed value to mm/min (monitor speed: 0.01 mm/min)
-        /// </summary>
-        public static string FormatSpeedMm(int rawValue)
-        {
-            double mmMin = rawValue / 100.0;
-            return mmMin.ToString("0.00", CultureInfo.InvariantCulture);
-        }
-
-        /// <summary>
-        /// Format axis status code to human-readable string.
-        /// </summary>
         public static string FormatAxisStatus(int status)
         {
             switch (status)
@@ -523,179 +454,21 @@ namespace DACDT_2026
                 default: return $"Unknown ({status})";
             }
         }
-        /// <summary>
-        /// Send all positioning data rows to PLC using a single bulk WriteBuffer call.
-        /// This is significantly faster than individual writes for large point sets.
-        /// </summary>
-        public static SendResult WritePositioningDataBulk(PLCCommunication plcComm, int axisIndex, List<PositioningDataRow> rows, bool writeStartNo = true, Action<int, int> progressCallback = null)
-        {
-            var result = new SendResult { Success = true };
 
-            if (plcComm == null || !plcComm.IsConnected)
-            {
-                result.Success = false;
-                result.ErrorMessage = "PLC is not connected.";
-                return result;
-            }
-
-            if (rows == null || rows.Count == 0)
-            {
-                result.Success = false;
-                result.ErrorMessage = "No points to send.";
-                return result;
-            }
-
-            int baseG = ProgramBaseG[axisIndex];
-
-            // Ghi từng điểm một (10 words/điểm) để đảm bảo tính đúng đắn và có thể báo tiến trình
-            for (int i = 0; i < rows.Count; i++)
-            {
-                var row = rows[i];
-                short[] pointData = new short[Stride]; // 10 words
-
-                // 1. Positioning Identifier (Da.1-Da.5 packed into Word 0)
-                pointData[OffsetMoveCode] = BuildPositioningIdentifierWord(row.MotionType);
-
-                // 2. M Code (Word 1)
-                pointData[OffsetMCode] = (short)ParseInt(row.MCodeValue);
-
-                // 3. Dwell Time (Word 2)
-                pointData[OffsetDwell] = (short)ParseInt(row.Dwell);
-
-                // 4. Command Speed (Word 4-5, 32-bit)
-                int speedVal = ParseInt(row.Speed) * SpeedMultiplier;
-                pointData[OffsetSpeed]     = (short)(speedVal & 0xFFFF);
-                pointData[OffsetSpeed + 1] = (short)((speedVal >> 16) & 0xFFFF);
-
-                // 5. Positioning Address (Word 6-7, 32-bit)
-                int endX = 0;
-                if (TryParseCoordinateX(row.EndCoordinate, out endX))
-                {
-                    pointData[OffsetPosX]     = (short)(endX & 0xFFFF);
-                    pointData[OffsetPosX + 1] = (short)((endX >> 16) & 0xFFFF);
-                }
-
-                // 6. Arc Address (Word 8-9, 32-bit)
-                int centerX = 0;
-                if (TryParseCoordinateX(row.CenterCoordinate, out centerX))
-                {
-                    pointData[OffsetCenterX]     = (short)(centerX & 0xFFFF);
-                    pointData[OffsetCenterX + 1] = (short)((centerX >> 16) & 0xFFFF);
-                }
-
-                try
-                {
-                    int pointAddress = baseG + i * Stride;
-                    int res = plcComm.WriteBuffer(0, pointAddress, pointData);
-                    if (res != 0)
-                    {
-                        result.Success = false;
-                        result.ErrorMessage = $"Lỗi ghi điểm {i + 1} tại G{pointAddress}: {res}";
-                        return result;
-                    }
-                }
-                catch (Exception ex)
-                {
-                    result.Success = false;
-                    result.ErrorMessage = ex.Message;
-                    return result;
-                }
-
-                // Cập nhật tiến trình sau mỗi 10 điểm hoặc điểm cuối
-                if ((i + 1) % 10 == 0 || (i + 1) == rows.Count)
-                {
-                    progressCallback?.Invoke(i + 1, rows.Count);
-                }
-            }
-
-            // Write Start No. = 1 to Control base register
-            if (writeStartNo && result.Success)
-            {
-                try
-                {
-                    string startDevice = $"U0\\G{ControlBaseG[axisIndex]}";
-                    string usedStart;
-                    int rStart = plcComm.WriteInt16ToDevicePath(startDevice, 1, out usedStart);
-                    result.WriteResults.Add(new WriteResult
-                    {
-                        Address = startDevice,
-                        Value = "1",
-                        Status = rStart == 0 ? "OK" : $"Error({rStart})",
-                        Message = "Start Axis " + (axisIndex + 1) + ": " + usedStart
-                    });
-                }
-                catch (Exception ex)
-                {
-                    result.WriteResults.Add(new WriteResult
-                    {
-                        Address = $"U0\\G{ControlBaseG[axisIndex]}",
-                        Value = "1",
-                        Status = "Error",
-                        Message = ex.Message
-                    });
-                    result.Success = false;
-                }
-            }
-
-            return result;
-        }
-
-        /// <summary>
-        /// Manual start axis
-        /// </summary>
-        public static WriteResult StartAxis(PLCCommunication plcComm, int axisIndex, int startNo)
-        {
-            if (plcComm == null || !plcComm.IsConnected)
-            {
-                return new WriteResult { Status = "Error", Message = "PLC not connected" };
-            }
-
-            try
-            {
-                string startDevice = $"U0\\G{ControlBaseG[axisIndex]}";
-                string used;
-                int result = plcComm.WriteInt16ToDevicePath(startDevice, (short)startNo, out used);
-                return new WriteResult
-                {
-                    Address = startDevice,
-                    Value   = startNo.ToString(),
-                    Status  = result == 0 ? "OK" : $"Error({result})",
-                    Message = $"Manual Start Axis {axisIndex + 1}: {used}"
-                }; 
-            }
-            catch (Exception ex)
-            {
-                return new WriteResult { Address = $"U0\\G{ControlBaseG[axisIndex]}", Status = "Error", Message = ex.Message };
-            }
-        }
-
-        /// <summary>
-        /// Cấu trúc dữ liệu cho một điểm định vị (Point) của module QD75/LD75.
-        /// C# sẽ tự động gộp các cấu hình rời rạc này thành chuẩn 10 Word của QD75.
-        /// </summary>
         public class PositioningPoint
         {
-            // Cấu hình (Sẽ được C# tự động gộp bit vào Offset 0)
-            public short OperationPattern { get; set; }   // Da.1 (VD: 0, 1, 3)
-            public short ControlSystem { get; set; }      // Da.2 (VD: 10, 15, 16)
-            public short AccelerationTimeNo { get; set; } // Da.3 (0-3)
-            public short DecelerationTimeNo { get; set; } // Da.4 (0-3)
-            public short PartnerAxis { get; set; }        // Da.5 (Trục nội suy: 0=Trục 1, 1=Trục 2...)
-
-            // Các thông số rời
-            public short MCode { get; set; }              // Offset 1
-            public short DwellTime { get; set; }          // Offset 2
-            
-            // Dữ liệu 32-bit (Bố trí chuẩn xác theo QD75 Manual)
-            public int CommandSpeed { get; set; }         // Offset 4 & 5 (Tốc độ)
-            public int PositioningAddress { get; set; }   // Offset 6 & 7 (Toạ độ)
-            public int ArcAddress { get; set; }           // Offset 8 & 9 (Tâm cung tròn)
+            public short OperationPattern { get; set; }
+            public short ControlSystem { get; set; }
+            public short AccelerationTimeNo { get; set; }
+            public short DecelerationTimeNo { get; set; }
+            public short PartnerAxis { get; set; }
+            public short MCode { get; set; }
+            public short DwellTime { get; set; }
+            public int CommandSpeed { get; set; }
+            public int PositioningAddress { get; set; }
+            public int ArcAddress { get; set; }
         }
 
-        /// <summary>
-        /// Hàm gộp (batch) dữ liệu và ghi cùng lúc xuống Buffer Memory.
-        /// Đã fix: Tự động gộp Da.1 -> Da.5 vào Offset 0 và mapping đúng cấu trúc QD75.
-        /// </summary>
         public static int WritePoints(PLCCommunication plcComm, int startIO, int startPointNo, List<PositioningPoint> points)
         {
             if (plcComm == null || !plcComm.IsConnected) return -1;
@@ -709,7 +482,6 @@ namespace DACDT_2026
                 int baseIndex = i * 10;
                 PositioningPoint pt = points[i];
 
-                // 1. Tự động gộp Da.1 đến Da.5 vào Offset 0 theo chuẩn QD75
                 int da1 = pt.OperationPattern & 0x03;
                 int da5 = pt.PartnerAxis & 0x03;
                 int da3 = pt.AccelerationTimeNo & 0x03;
@@ -717,32 +489,18 @@ namespace DACDT_2026
                 int da2 = pt.ControlSystem & 0xFF;
                 sData[baseIndex + 0] = (short)(da1 | (da5 << 2) | (da3 << 4) | (da4 << 6) | (da2 << 8));
                 
-                // 2. Offset 1: M Code
                 sData[baseIndex + 1] = pt.MCode;
-                
-                // 3. Offset 2: Dwell Time
                 sData[baseIndex + 2] = pt.DwellTime;
-                
-                // 4. Offset 3: Dự phòng (thường là 0)
                 sData[baseIndex + 3] = 0;
-
-                // 5. Offset 4 & 5: Command Speed (Da.8)
                 sData[baseIndex + 4] = (short)(pt.CommandSpeed & 0xFFFF);
                 sData[baseIndex + 5] = (short)((pt.CommandSpeed >> 16) & 0xFFFF);
-
-                // 6. Offset 6 & 7: Positioning Address (Da.6)
                 sData[baseIndex + 6] = (short)(pt.PositioningAddress & 0xFFFF);
                 sData[baseIndex + 7] = (short)((pt.PositioningAddress >> 16) & 0xFFFF);
-
-                // 7. Offset 8 & 9: Arc Address (Da.7)
                 sData[baseIndex + 8] = (short)(pt.ArcAddress & 0xFFFF);
                 sData[baseIndex + 9] = (short)((pt.ArcAddress >> 16) & 0xFFFF);
             }
 
-            // Địa chỉ Buffer Memory cho điểm số n bắt đầu từ 2000
             int iAddress = 2000 + (startPointNo - 1) * 10;
-
-            // Ghi xuống PLC
             return plcComm.WriteBuffer(startIO, iAddress, sData);
         }
     }

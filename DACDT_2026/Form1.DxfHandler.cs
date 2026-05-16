@@ -429,23 +429,18 @@ namespace DACDT_2026
             }
 
             // ── Tạm dừng poll timer để tránh ContextSwitchDeadlock ──────────────────
-            // Poll timer chạy Task.Run với COM calls từ background thread.
-            // Nếu UI thread đang bận ghi batch data, COM không thể marshal
-            // từ background thread về STA thread → deadlock sau 60 giây.
             plcPollTimer.Stop();
 
             try
             {
                 // ── BƯỚC 1: Master axis (Axis 1 / X): nạp dữ liệu vào bộ đệm (G2000+) ────
-                // Tắt writeStartNo để máy KHÔNG chạy ngay lập tức.
                 Action<int, int> progressCbX = (current, total) => 
                 {
                     _ = PostToUiAsync("updateSendProgress", new { axis = "X", current, total });
-                    // Small delay to allow UI to render and keep responsiveness
                     Task.Delay(10).Wait(); 
                 };
 
-                var sendResult = QD75BufferWriter.WritePositioningDataBulk(plcComm, 0, dataRows, writeStartNo: false, progressCbX);
+                var sendResult = await QD75BufferWriter.WritePositioningDataBulkAsync(plcComm, 0, dataRows, writeStartNo: false, progressCbX);
 
                 if (!sendResult.Success)
                 {
@@ -460,7 +455,7 @@ namespace DACDT_2026
                     Task.Delay(10).Wait();
                 };
 
-                var slaveResult = QD75BufferWriter.WriteSlaveAxisDataBulk(plcComm, dataRows, slaveBaseG: 8000, progressCbY);
+                var slaveResult = await QD75BufferWriter.WriteSlaveAxisDataBulkAsync(plcComm, dataRows, 8000, progressCbY);
 
                 if (!slaveResult.Success)
                 {
