@@ -468,7 +468,7 @@ function renderCadPreview() {
   if (!primitives.length) { dom.cadPreview.innerHTML = ""; dom.cadPlaceholder.classList.remove("hidden"); return; }
   dom.cadPlaceholder.classList.add("hidden");
   const W = 1000, H = 560;
-  const zPanelH = isGcode ? 86 : 0;
+  const zPanelH = 0;
   const xyH = H - zPanelH;
   const pad = 28, ww = Math.max(bounds.width || 0, 1), wh = Math.max(bounds.height || 0, 1);
   const sc = Math.min((W - pad * 2) / ww, (xyH - pad * 2) / wh), ox = (W - ww * sc) / 2, oy = (xyH - wh * sc) / 2;
@@ -492,61 +492,6 @@ function renderCadPreview() {
   const aM = Object.entries(state.dxf.assignedPointKeys || {}).map(([slot, key]) => { const p = points.find(i => i.key === key); if (!p) return ""; const pp = proj(p); const t = getAssignmentTone(slot); return `<circle cx="${pp.x.toFixed(2)}" cy="${pp.y.toFixed(2)}" r="10.5" fill="${t.fill}" stroke="white" stroke-width="1.8"></circle><text class="cad-assignment-text" x="${pp.x.toFixed(2)}" y="${pp.y.toFixed(2)}">${t.label}</text>`; }).join("");
 
   let zProfileSvg = "";
-  if (isGcode && zPanelH > 0) {
-    let zMn = Infinity, zMx = -Infinity;
-    for (const pr of primitives) {
-      for (const pt of pr.points || []) {
-        const z = pt.z != null ? Number(pt.z) : 0;
-        zMn = Math.min(zMn, z); zMx = Math.max(zMx, z);
-      }
-    }
-    if (!isFinite(zMn)) { zMn = 0; zMx = 0; }
-    const zSpan = Math.max(zMx - zMn, 1e-9);
-
-    let lastPt = null, runDist = 0;
-    const zSamples = [];
-    for (const pr of primitives) {
-      for (const p of pr.points || []) {
-        const zz = p.z != null ? Number(p.z) : 0;
-        if (lastPt) runDist += Math.hypot(p.x - lastPt.x, p.y - lastPt.y);
-        zSamples.push({ d: runDist, z: zz });
-        lastPt = p;
-      }
-    }
-    const dMax = zSamples.length ? zSamples[zSamples.length - 1].d : 0;
-
-    const margin = { l: pad + 52, r: W - pad - 12, t: xyH + 22, b: H - 18 };
-    const innerW = margin.r - margin.l, innerH = margin.b - margin.t;
-    const mapD = d => margin.l + (dMax > 1e-9 ? (d / dMax) * innerW : innerW / 2);
-    const mapZv = z => margin.b - ((Number(z) - zMn) / zSpan) * innerH;
-
-    const gridLines = [];
-    for (let i = 1; i <= 3; i++) {
-      const x = margin.l + (innerW * i) / 4;
-      gridLines.push(`<line class="cad-elevation-grid" x1="${x.toFixed(1)}" y1="${margin.t}" x2="${x.toFixed(1)}" y2="${margin.b}"/>`);
-    }
-    for (let i = 1; i <= 3; i++) {
-      const y = margin.t + (innerH * i) / 4;
-      gridLines.push(`<line class="cad-elevation-grid" x1="${margin.l}" y1="${y.toFixed(1)}" x2="${margin.r}" y2="${y.toFixed(1)}"/>`);
-    }
-
-    let zPathD = "";
-    if (zSamples.length > 1)
-      zPathD = zSamples.map((s, i) => `${i === 0 ? "M" : "L"} ${mapD(s.d).toFixed(2)} ${mapZv(s.z).toFixed(2)}`).join(" ");
-
-    const zLabY = (margin.t + margin.b) / 2;
-    zProfileSvg = `<g class="cad-elevation" pointer-events="none">
-      <rect class="cad-elevation-frame" x="${pad}" y="${xyH + 2}" width="${W - pad * 2}" height="${zPanelH - 4}" />
-      <text class="cad-elevation-title" x="${margin.l}" y="${xyH + 16}">Hình chiếu cao độ (mặt phẳng L–Z, L = quãng đường trên XY)</text>
-      <text class="cad-elevation-dim" x="${margin.r}" y="${xyH + 16}" text-anchor="end">Z: ${zMn.toFixed(3)} … ${zMx.toFixed(3)} mm — L: ${dMax.toFixed(3)} mm</text>
-      ${gridLines.join("")}
-      <line class="cad-elevation-axis" x1="${margin.l}" y1="${margin.b}" x2="${margin.r}" y2="${margin.b}"/>
-      <line class="cad-elevation-axis" x1="${margin.l}" y1="${margin.t}" x2="${margin.l}" y2="${margin.b}"/>
-      ${zPathD ? `<path class="cad-elevation-path" d="${zPathD}" />` : (zSamples.length === 1 ? `<circle class="cad-elevation-dot" cx="${mapD(zSamples[0].d).toFixed(2)}" cy="${mapZv(zSamples[0].z).toFixed(2)}" r="2.8" />` : "")}
-      <text class="cad-elevation-label" x="${margin.l + innerW / 2}" y="${H - 6}" text-anchor="middle">L — chiều dài lộ trình XY (mm)</text>
-      <text class="cad-elevation-label" x="${pad + 8}" y="${zLabY.toFixed(1)}" text-anchor="middle" transform="rotate(-90 ${pad + 8} ${zLabY.toFixed(1)})">Z (mm)</text>
-    </g>`;
-  }
 
   const p0 = proj({ x: 0, y: 0 });
   const px = proj({ x: 170, y: 0 });
