@@ -405,16 +405,26 @@ namespace DACDT_2026
                 return;
             }
 
+            if (isSendingToPlc)
+            {
+                await NotifyAsync("info", "PLC", "PLC data transfer is already running.");
+                return;
+            }
+
             // Map ProcessRow → QD75BufferWriter.PositioningDataRow (tọa độ đã cộng offset)
             var dataRows = new List<QD75BufferWriter.PositioningDataRow>();
             string lastSpeed = globalSpeed; // fallback to globalSpeed if no F at all
 
             foreach (var row in processRows)
             {
+                string effectiveSpeed = lastSpeed;
                 if (!string.IsNullOrEmpty(row.Speed))
                 {
                     if (int.TryParse(row.Speed, out int s) && s > 0)
+                    {
                         lastSpeed = row.Speed;
+                        effectiveSpeed = row.Speed;
+                    }
                 }
 
                 dataRows.Add(new QD75BufferWriter.PositioningDataRow
@@ -422,13 +432,14 @@ namespace DACDT_2026
                     MotionType       = row.MotionType,
                     MCodeValue       = row.MCodeValue,
                     Dwell            = row.Dwell,
-                    Speed            = row.Speed,
+                    Speed            = effectiveSpeed,
                     EndCoordinate    = ApplyOffsetToCoordSend(row.EndCoordinate,    offsetX, offsetY),
                     CenterCoordinate = ApplyOffsetToCoordSend(row.CenterCoordinate, offsetX, offsetY)
                 });
             }
 
             // ── Tạm dừng poll timer để tránh ContextSwitchDeadlock ──────────────────
+            isSendingToPlc = true;
             plcPollTimer.Stop();
 
             try
@@ -437,10 +448,9 @@ namespace DACDT_2026
                 Action<int, int> progressCbX = (current, total) => 
                 {
                     _ = PostToUiAsync("updateSendProgress", new { axis = "X", current, total });
-                    Task.Delay(10).Wait(); 
                 };
 
-                var sendResult = await QD75BufferWriter.WritePositioningDataBulkAsync(plcComm, 0, dataRows, writeStartNo: false, progressCbX);
+                var sendResult = await QD75BufferWriter.WritePositioningDataStableAsync(plcComm, 0, dataRows, progressCbX);
 
                 if (!sendResult.Success)
                 {
@@ -452,10 +462,9 @@ namespace DACDT_2026
                 Action<int, int> progressCbY = (current, total) => 
                 {
                     _ = PostToUiAsync("updateSendProgress", new { axis = "Y", current, total });
-                    Task.Delay(10).Wait();
                 };
 
-                var slaveResult = await QD75BufferWriter.WriteSlaveAxisDataBulkAsync(plcComm, dataRows, 8000, progressCbY);
+                var slaveResult = await QD75BufferWriter.WriteSlaveAxisDataStableAsync(plcComm, dataRows, 8000, progressCbY);
 
                 if (!slaveResult.Success)
                 {
@@ -471,6 +480,7 @@ namespace DACDT_2026
             finally
             {
                 // ── Bật lại poll timer sau khi ghi xong (hoặc lỗi) ──────────────────
+                isSendingToPlc = false;
                 if (plcComm != null && plcComm.IsConnected && !isClosing)
                     plcPollTimer.Start();
             }

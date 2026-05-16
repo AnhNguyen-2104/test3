@@ -284,6 +284,12 @@ namespace DACDT_2026
 
             try
             {
+                if (InvokeRequired)
+                {
+                    BeginInvoke(new Action(async () => await PostToUiAsync(type, payload)));
+                    return;
+                }
+
                 if (webView == null || webView.IsDisposed || webView.CoreWebView2 == null) return;
 
                 string json = serializer.Serialize(new { type, payload });

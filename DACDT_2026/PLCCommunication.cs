@@ -10,6 +10,7 @@ namespace DACDT_2026
         private dynamic plcDevice;
         private bool isConnected = false;
         private readonly object commLock = new object();
+        private const int MaxBufferWordsPerCall = 900;
 
         public string IPAddress { get; set; }
         public int Port { get; set; } = 2000;
@@ -258,12 +259,15 @@ namespace DACDT_2026
 
         public void WriteDeviceValue(string deviceName, int value)
         {
-            if (!isConnected) throw new InvalidOperationException("Chưa kết nối PLC");
+            if (!isConnected) throw new InvalidOperationException("PLC is not connected.");
 
-            int result = WriteInt32ToDevicePath(deviceName, value, out string method);
-            if (result != 0)
+            lock (commLock)
             {
-                throw new Exception($"Lỗi {method} {deviceName}: {GetErrorMessage(result)}");
+                int result = WriteInt32ToDevicePath(deviceName, value, out string method);
+                if (result != 0)
+                {
+                    throw new Exception($"{method} {deviceName} error: {GetErrorMessage(result)}");
+                }
             }
         }
 
@@ -294,6 +298,62 @@ namespace DACDT_2026
                     throw new Exception($"Lỗi WriteBuffer: {GetInnermostMessage(ex)}");
                 }
             }
+        }
+
+        public int WriteBufferBlock(int startIO, int address, short[] data, int offset, int count)
+        {
+            if (!isConnected) throw new InvalidOperationException("PLC is not connected.");
+            if (data == null) throw new ArgumentNullException(nameof(data));
+            if (offset < 0 || count < 0 || offset + count > data.Length) throw new ArgumentOutOfRangeException(nameof(offset));
+            if (count == 0) return 0;
+
+            lock (commLock)
+            {
+                try
+                {
+                    int written = 0;
+                    while (written < count)
+                    {
+                        int blockCount = Math.Min(MaxBufferWordsPerCall, count - written);
+                        int currentOffset = offset + written;
+                        int currentAddress = address + written;
+                        int result;
+
+                        try
+                        {
+                            result = plcDevice.WriteBuffer(startIO, currentAddress, blockCount, ref data[currentOffset]);
+                        }
+                        catch
+                        {
+                            result = WriteBufferWordsLocked(startIO, currentAddress, data, currentOffset, blockCount);
+                        }
+
+                        if (result != 0)
+                        {
+                            result = WriteBufferWordsLocked(startIO, currentAddress, data, currentOffset, blockCount);
+                            if (result != 0) return result;
+                        }
+
+                        written += blockCount;
+                    }
+
+                    return 0;
+                }
+                catch (Exception ex)
+                {
+                    throw new Exception($"WriteBufferBlock error: {GetInnermostMessage(ex)}");
+                }
+            }
+        }
+
+        private int WriteBufferWordsLocked(int startIO, int address, short[] data, int offset, int count)
+        {
+            for (int i = 0; i < count; i++)
+            {
+                int res = plcDevice.WriteBuffer(startIO, address + i, 1, ref data[offset + i]);
+                if (res != 0) return res;
+            }
+            return 0;
         }
 
         /// <summary>

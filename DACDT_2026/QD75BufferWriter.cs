@@ -45,6 +45,8 @@ namespace DACDT_2026
         public const double CoordinateMultiplier = 10000.0;
         // Speed multiplier: user mm/min → QD75 speed units
         public const int SpeedMultiplier = 100;
+        private const int MaxWordsPerPlcWrite = 900;
+        private const int SlaveProgressStep = 10;
 
         /// <summary>
         /// Result of a single buffer write operation.
@@ -386,6 +388,156 @@ namespace DACDT_2026
             return finalResult;
         }
 
+        public static async Task<SendResult> WritePositioningDataStableAsync(PLCCommunication plcComm, int axisIndex, List<PositioningDataRow> rows, Action<int, int> progressCallback = null)
+        {
+            var validation = ValidateBulkRequest(plcComm, rows);
+            if (!validation.Success) return validation;
+            if (axisIndex < 0 || axisIndex >= ProgramBaseG.Length)
+                return new SendResult { Success = false, ErrorMessage = "Invalid axis index." };
+
+            return await Task.Run(() =>
+            {
+                var result = new SendResult { Success = true };
+                int baseG = ProgramBaseG[axisIndex];
+
+                try
+                {
+                    short[] allWords = BuildMasterAxisWords(rows);
+                    int maxRowsPerWrite = Math.Max(1, MaxWordsPerPlcWrite / Stride);
+
+                    for (int rowOffset = 0; rowOffset < rows.Count; rowOffset += maxRowsPerWrite)
+                    {
+                        int rowsInBlock = Math.Min(maxRowsPerWrite, rows.Count - rowOffset);
+                        int wordOffset = rowOffset * Stride;
+                        int wordCount = rowsInBlock * Stride;
+                        int address = baseG + wordOffset;
+
+                        int res = plcComm.WriteBufferBlock(0, address, allWords, wordOffset, wordCount);
+                        if (res != 0)
+                        {
+                            result.Success = false;
+                            result.ErrorMessage = $"Failed to write Axis {axisIndex + 1} block at G{address}: {res}";
+                            return result;
+                        }
+
+                        progressCallback?.Invoke(rowOffset + rowsInBlock, rows.Count);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    result.Success = false;
+                    result.ErrorMessage = ex.Message;
+                }
+
+                return result;
+            });
+        }
+
+        public static async Task<SendResult> WriteSlaveAxisDataStableAsync(PLCCommunication plcComm, List<PositioningDataRow> rows, int slaveBaseG = 8000, Action<int, int> progressCallback = null)
+        {
+            var validation = ValidateBulkRequest(plcComm, rows);
+            if (!validation.Success) return validation;
+
+            return await Task.Run(() =>
+            {
+                var result = new SendResult { Success = true };
+
+                try
+                {
+                    short[] slaveWords = BuildSlaveAxisPositionWords(rows);
+
+                    for (int i = 0; i < rows.Count; i++)
+                    {
+                        int address = slaveBaseG + (i * Stride) + OffsetPosX;
+                        int wordOffset = i * 4;
+                        int res = plcComm.WriteBufferBlock(0, address, slaveWords, wordOffset, 4);
+                        if (res != 0)
+                        {
+                            result.Success = false;
+                            result.ErrorMessage = $"Failed to write Axis 2 point {i + 1} at G{address}: {res}";
+                            return result;
+                        }
+
+                        int completed = i + 1;
+                        if (completed % SlaveProgressStep == 0 || completed == rows.Count)
+                            progressCallback?.Invoke(completed, rows.Count);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    result.Success = false;
+                    result.ErrorMessage = ex.Message;
+                }
+
+                return result;
+            });
+        }
+
+        private static SendResult ValidateBulkRequest(PLCCommunication plcComm, List<PositioningDataRow> rows)
+        {
+            if (plcComm == null || !plcComm.IsConnected)
+                return new SendResult { Success = false, ErrorMessage = "PLC is not connected." };
+
+            if (rows == null || rows.Count == 0)
+                return new SendResult { Success = false, ErrorMessage = "No points to send." };
+
+            return new SendResult { Success = true };
+        }
+
+        private static short[] BuildMasterAxisWords(List<PositioningDataRow> rows)
+        {
+            short[] words = new short[rows.Count * Stride];
+
+            Parallel.For(0, rows.Count, i =>
+            {
+                int baseIndex = i * Stride;
+                PositioningDataRow row = rows[i];
+
+                words[baseIndex + OffsetMoveCode] = BuildPositioningIdentifierWord(row.MotionType);
+                words[baseIndex + OffsetMCode] = (short)ParseInt(row.MCodeValue);
+                words[baseIndex + OffsetDwell] = (short)ParseInt(row.Dwell);
+
+                int speedVal = ParseInt(row.Speed) * SpeedMultiplier;
+                WriteInt32Words(words, baseIndex + OffsetSpeed, speedVal);
+
+                int endX;
+                if (TryParseCoordinateX(row.EndCoordinate, out endX))
+                    WriteInt32Words(words, baseIndex + OffsetPosX, endX);
+
+                int centerX;
+                if (TryParseCoordinateX(row.CenterCoordinate, out centerX))
+                    WriteInt32Words(words, baseIndex + OffsetCenterX, centerX);
+            });
+
+            return words;
+        }
+
+        private static short[] BuildSlaveAxisPositionWords(List<PositioningDataRow> rows)
+        {
+            short[] words = new short[rows.Count * 4];
+
+            Parallel.For(0, rows.Count, i =>
+            {
+                int baseIndex = i * 4;
+
+                int endY;
+                if (TryParseCoordinateY(rows[i].EndCoordinate, out endY))
+                    WriteInt32Words(words, baseIndex, endY);
+
+                int centerY;
+                if (TryParseCoordinateY(rows[i].CenterCoordinate, out centerY))
+                    WriteInt32Words(words, baseIndex + 2, centerY);
+            });
+
+            return words;
+        }
+
+        private static void WriteInt32Words(short[] words, int index, int value)
+        {
+            words[index] = (short)(value & 0xFFFF);
+            words[index + 1] = (short)((value >> 16) & 0xFFFF);
+        }
+
         public static WriteResult StartAxis(PLCCommunication plcComm, int axisIndex, int startNo)
         {
             if (plcComm == null || !plcComm.IsConnected)
@@ -501,7 +653,7 @@ namespace DACDT_2026
             }
 
             int iAddress = 2000 + (startPointNo - 1) * 10;
-            return plcComm.WriteBuffer(startIO, iAddress, sData);
+            return plcComm.WriteBufferBlock(startIO, iAddress, sData, 0, sData.Length);
         }
     }
 }

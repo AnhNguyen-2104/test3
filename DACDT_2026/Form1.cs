@@ -97,6 +97,7 @@ namespace DACDT_2026
         private volatile bool webReady;
         private volatile bool isClosing;
         private volatile bool isPolling;
+        private volatile bool isSendingToPlc;
         private string currentView    = "control";
         private string currentTheme   = "dark";
         private string plcIpAddress   = "192.168.3.39";
