@@ -144,9 +144,9 @@ namespace DACDT_2026
                 var startPoint = new CadDocumentService.CadCoordinate(currentX, currentY, currentZ);
 
                 if (isArc)
-                    AddArcPrimitive(result, frame, startPoint, nextPoint, motion == 2, unitScale, currentF, modalM, frame.P);
+                    AddArcPrimitive(result, frame, startPoint, nextPoint, motion == 2, unitScale, modalF, modalM, frame.P);
                 else if (!AreClose(startPoint, nextPoint))
-                    AddLinePrimitive(result, startPoint, nextPoint, motion == 0, currentF, modalM, frame.P);
+                    AddLinePrimitive(result, startPoint, nextPoint, motion == 0, modalF, modalM, frame.P);
 
                 currentX = nextX;
                 currentY = nextY;
