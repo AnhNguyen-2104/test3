@@ -216,7 +216,9 @@ namespace DACDT_2026
                     Left = minX == double.MaxValue ? 0.0 : minX,
                     Top = minY == double.MaxValue ? 0.0 : minY,
                     Right = maxX == double.MinValue ? 100.0 : maxX,
-                    Bottom = maxY == double.MinValue ? 100.0 : maxY
+                    Bottom = maxY == double.MinValue ? 100.0 : maxY,
+                    MinZ = 0.0,
+                    MaxZ = 0.0
                 };
                 bounds.Width = Math.Max(bounds.Right - bounds.Left, 1.0);
                 bounds.Height = Math.Max(bounds.Bottom - bounds.Top, 1.0);
@@ -421,8 +423,10 @@ namespace DACDT_2026
                     LineType = lineType,
                     X = x,
                     Y = y,
+                    Z = 0.0,
                     XDisplay = FormatNumber(x),
                     YDisplay = FormatNumber(y),
+                    ZDisplay = "0",
                     Key = key
                 };
 

@@ -20,6 +20,8 @@ let modalSubmit = null;
 let cadPanX = 0, cadPanY = 0, cadZoom = 1, isCadPanning = false, startCadPanX = 0, startCadPanY = 0;
 
 window.app = { receive(m) { handleHostMessage(m || {}); } };
+// Expose state globally for cad3d.js access
+window.cadState = state;
 
 document.addEventListener("DOMContentLoaded", () => { cacheDom(); bindEvents(); applyTheme(state.theme); applyView(state.view); post("uiReady"); });
 
@@ -404,28 +406,47 @@ function renderDxf() {
   }
 
   renderPointsTable(); renderProcessTable(); renderCadPreview(); updateNavState();
+  // Trigger 3D view update if loaded
+  if (window.cad3d && typeof window.cad3d.update3DScene === 'function') {
+    window.cad3d.update3DScene();
+  }
 }
 
 function renderPointsTable() {
   const points = state.dxf.points || [], primitives = state.dxf.primitives || [], rows = [];
-  function findPK(x, y) { const p = points.find(p => Math.abs((p.x || 0) - x) < 1e-3 && Math.abs((p.y || 0) - y) < 1e-3); return p ? p.key : ""; }
-  function findPI(x, y) { const p = points.find(p => Math.abs((p.x || 0) - x) < 1e-3 && Math.abs((p.y || 0) - y) < 1e-3); return p && p.index != null ? p.index : ""; }
+  function pz(p) { return p && p.z != null ? Number(p.z) : 0; }
+  function findPK(x, y, z) {
+    const zz = z != null && z !== undefined ? Number(z) : 0;
+    const p = points.find(pt => Math.abs((pt.x || 0) - x) < 1e-3 && Math.abs((pt.y || 0) - y) < 1e-3 && Math.abs(pz(pt) - zz) < 1e-3);
+    return p ? p.key : "";
+  }
+  function findPI(x, y, z) {
+    const zz = z != null && z !== undefined ? Number(z) : 0;
+    const p = points.find(pt => Math.abs((pt.x || 0) - x) < 1e-3 && Math.abs((pt.y || 0) - y) < 1e-3 && Math.abs(pz(pt) - zz) < 1e-3);
+    return p && p.index != null ? p.index : "";
+  }
   let ai = 1;
   for (const prim of primitives) {
     if (!prim.points || !prim.points.length) continue;
     let dt = "Line";
-    if ((prim.sourceType || "").toLowerCase().includes("arc")) dt = "Arc";
-    if ((prim.sourceType || "").toLowerCase().includes("circle")) dt = "Circle";
-    let cx = "", cy = "";
-    if (prim.center) { cx = Number(prim.center.x).toFixed(3); cy = Number(prim.center.y).toFixed(3); }
-    if (dt === "Line") {
+    const st = (prim.sourceType || "").toLowerCase();
+    if (st.includes("arc")) dt = "Arc";
+    else if (st.includes("circle")) dt = "Circle";
+    else if (st.includes("g0") || st.includes("rapid")) dt = "Rapid (G0)";
+    let cx = "", cy = "", cz = "";
+    if (prim.center) {
+      cx = Number(prim.center.x).toFixed(3);
+      cy = Number(prim.center.y).toFixed(3);
+      cz = prim.center.z != null ? Number(prim.center.z).toFixed(3) : "";
+    }
+    if (dt === "Line" || dt === "Rapid (G0)") {
       for (let j = 0; j < prim.points.length - 1; j++) {
-        const s = prim.points[j], e = prim.points[j + 1], key = findPK(s.x, s.y), stt = findPI(s.x, s.y) || ai++;
-        rows.push(`<tr data-point-key="${esc(key)}"><td>${esc(stt)}</td><td>${esc(dt)}</td><td>${Number(s.x).toFixed(3)}</td><td>${Number(s.y).toFixed(3)}</td><td>${Number(e.x).toFixed(3)}</td><td>${Number(e.y).toFixed(3)}</td><td></td><td></td></tr>`);
+        const s = prim.points[j], e = prim.points[j + 1], key = findPK(s.x, s.y, pz(s)), stt = findPI(s.x, s.y, pz(s)) || ai++;
+        rows.push(`<tr data-point-key="${esc(key)}"><td>${esc(stt)}</td><td>${esc(dt)}</td><td>${Number(s.x).toFixed(3)}</td><td>${Number(s.y).toFixed(3)}</td><td>${pz(s).toFixed(3)}</td><td>${Number(e.x).toFixed(3)}</td><td>${Number(e.y).toFixed(3)}</td><td>${pz(e).toFixed(3)}</td><td></td><td></td><td></td></tr>`);
       }
     } else {
-      const s = prim.points[0], e = prim.points[prim.points.length - 1], key = findPK(s.x, s.y), stt = findPI(s.x, s.y) || ai++;
-      rows.push(`<tr data-point-key="${esc(key)}"><td>${esc(stt)}</td><td>${esc(dt)}</td><td>${Number(s.x).toFixed(3)}</td><td>${Number(s.y).toFixed(3)}</td><td>${Number(e.x).toFixed(3)}</td><td>${Number(e.y).toFixed(3)}</td><td>${esc(cx)}</td><td>${esc(cy)}</td></tr>`);
+      const s = prim.points[0], e = prim.points[prim.points.length - 1], key = findPK(s.x, s.y, pz(s)), stt = findPI(s.x, s.y, pz(s)) || ai++;
+      rows.push(`<tr data-point-key="${esc(key)}"><td>${esc(stt)}</td><td>${esc(dt)}</td><td>${Number(s.x).toFixed(3)}</td><td>${Number(s.y).toFixed(3)}</td><td>${pz(s).toFixed(3)}</td><td>${Number(e.x).toFixed(3)}</td><td>${Number(e.y).toFixed(3)}</td><td>${pz(e).toFixed(3)}</td><td>${esc(cx)}</td><td>${esc(cy)}</td><td>${esc(cz)}</td></tr>`);
     }
   }
   dom.pointsBody.innerHTML = rows.join("");
@@ -443,39 +464,106 @@ function renderProcessTable() {
 
 function renderCadPreview() {
   const primitives = state.dxf.primitives || [], points = state.dxf.points || [], bounds = state.dxf.bounds || { left: 0, top: 0, width: 100, height: 100 };
+  const isGcode = (state.dxf.fileKind || "").toUpperCase() === "GCODE";
   if (!primitives.length) { dom.cadPreview.innerHTML = ""; dom.cadPlaceholder.classList.remove("hidden"); return; }
   dom.cadPlaceholder.classList.add("hidden");
-  const W = 1000, H = 560, pad = 28, ww = Math.max(bounds.width || 0, 1), wh = Math.max(bounds.height || 0, 1);
-  const sc = Math.min((W - pad * 2) / ww, (H - pad * 2) / wh), ox = (W - ww * sc) / 2, oy = (H - wh * sc) / 2;
-  const proj = p => ({ x: ox + (p.x - bounds.left) * sc, y: H - oy - (p.y - bounds.top) * sc });
-  const polyM = primitives.map(pr => { const pa = (pr.points || []).map(p => { const pp = proj(p); return `${pp.x.toFixed(2)},${pp.y.toFixed(2)}`; }).join(" "); return `<polyline class="cad-line" points="${pa}"></polyline>`; }).join("");
-  const ptM = points.map(p => { const pp = proj(p); const sel = p.key === state.dxf.selectedPointKey ? "is-selected" : ""; return `<circle class="cad-point ${sel}" cx="${pp.x.toFixed(2)}" cy="${pp.y.toFixed(2)}" r="4.8" data-point-key="${esc(p.key || "")}"></circle>`; }).join("");
+  const W = 1000, H = 560;
+  const zPanelH = isGcode ? 86 : 0;
+  const xyH = H - zPanelH;
+  const pad = 28, ww = Math.max(bounds.width || 0, 1), wh = Math.max(bounds.height || 0, 1);
+  const sc = Math.min((W - pad * 2) / ww, (xyH - pad * 2) / wh), ox = (W - ww * sc) / 2, oy = (xyH - wh * sc) / 2;
+  const proj = p => ({ x: ox + (p.x - bounds.left) * sc, y: xyH - oy - (p.y - bounds.top) * sc });
+
+  function primIsRapid(pr) {
+    const st = (pr.sourceType || "").toLowerCase();
+    return st.includes("g0") || st.includes("rapid");
+  }
+
+  const polyM = primitives.map(pr => {
+    const pts = pr.points || [];
+    if (pts.length < 2) return "";
+    const pa = pts.map(p => { const pp = proj(p); return `${pp.x.toFixed(2)},${pp.y.toFixed(2)}`; }).join(" ");
+    const rapid = isGcode && primIsRapid(pr);
+    const cls = rapid ? "cad-line cad-line-rapid" : "cad-line";
+    return `<polyline class="${cls}" points="${pa}"></polyline>`;
+  }).join("");
+
+  const ptM = isGcode ? "" : points.map(p => { const pp = proj(p); const sel = p.key === state.dxf.selectedPointKey ? "is-selected" : ""; return `<circle class="cad-point ${sel}" cx="${pp.x.toFixed(2)}" cy="${pp.y.toFixed(2)}" r="4.8" data-point-key="${esc(p.key || "")}"></circle>`; }).join("");
   const aM = Object.entries(state.dxf.assignedPointKeys || {}).map(([slot, key]) => { const p = points.find(i => i.key === key); if (!p) return ""; const pp = proj(p); const t = getAssignmentTone(slot); return `<circle cx="${pp.x.toFixed(2)}" cy="${pp.y.toFixed(2)}" r="10.5" fill="${t.fill}" stroke="white" stroke-width="1.8"></circle><text class="cad-assignment-text" x="${pp.x.toFixed(2)}" y="${pp.y.toFixed(2)}">${t.label}</text>`; }).join("");
-  
-  const p0 = proj({x: 0, y: 0});
-  const px = proj({x: 170, y: 0});
-  const py = proj({x: 0, y: 170});
-  const pxy = proj({x: 170, y: 170});
+
+  let zProfileSvg = "";
+  if (isGcode && zPanelH > 0) {
+    let zMn = Infinity, zMx = -Infinity;
+    for (const pr of primitives) {
+      for (const pt of pr.points || []) {
+        const z = pt.z != null ? Number(pt.z) : 0;
+        zMn = Math.min(zMn, z); zMx = Math.max(zMx, z);
+      }
+    }
+    if (!isFinite(zMn)) { zMn = 0; zMx = 0; }
+    const zSpan = Math.max(zMx - zMn, 1e-9);
+
+    let lastPt = null, runDist = 0;
+    const zSamples = [];
+    for (const pr of primitives) {
+      for (const p of pr.points || []) {
+        const zz = p.z != null ? Number(p.z) : 0;
+        if (lastPt) runDist += Math.hypot(p.x - lastPt.x, p.y - lastPt.y);
+        zSamples.push({ d: runDist, z: zz });
+        lastPt = p;
+      }
+    }
+    const dMax = zSamples.length ? zSamples[zSamples.length - 1].d : 0;
+
+    const margin = { l: pad + 52, r: W - pad - 12, t: xyH + 22, b: H - 18 };
+    const innerW = margin.r - margin.l, innerH = margin.b - margin.t;
+    const mapD = d => margin.l + (dMax > 1e-9 ? (d / dMax) * innerW : innerW / 2);
+    const mapZv = z => margin.b - ((Number(z) - zMn) / zSpan) * innerH;
+
+    const gridLines = [];
+    for (let i = 1; i <= 3; i++) {
+      const x = margin.l + (innerW * i) / 4;
+      gridLines.push(`<line class="cad-elevation-grid" x1="${x.toFixed(1)}" y1="${margin.t}" x2="${x.toFixed(1)}" y2="${margin.b}"/>`);
+    }
+    for (let i = 1; i <= 3; i++) {
+      const y = margin.t + (innerH * i) / 4;
+      gridLines.push(`<line class="cad-elevation-grid" x1="${margin.l}" y1="${y.toFixed(1)}" x2="${margin.r}" y2="${y.toFixed(1)}"/>`);
+    }
+
+    let zPathD = "";
+    if (zSamples.length > 1)
+      zPathD = zSamples.map((s, i) => `${i === 0 ? "M" : "L"} ${mapD(s.d).toFixed(2)} ${mapZv(s.z).toFixed(2)}`).join(" ");
+
+    const zLabY = (margin.t + margin.b) / 2;
+    zProfileSvg = `<g class="cad-elevation" pointer-events="none">
+      <rect class="cad-elevation-frame" x="${pad}" y="${xyH + 2}" width="${W - pad * 2}" height="${zPanelH - 4}" />
+      <text class="cad-elevation-title" x="${margin.l}" y="${xyH + 16}">Hình chiếu cao độ (mặt phẳng L–Z, L = quãng đường trên XY)</text>
+      <text class="cad-elevation-dim" x="${margin.r}" y="${xyH + 16}" text-anchor="end">Z: ${zMn.toFixed(3)} … ${zMx.toFixed(3)} mm — L: ${dMax.toFixed(3)} mm</text>
+      ${gridLines.join("")}
+      <line class="cad-elevation-axis" x1="${margin.l}" y1="${margin.b}" x2="${margin.r}" y2="${margin.b}"/>
+      <line class="cad-elevation-axis" x1="${margin.l}" y1="${margin.t}" x2="${margin.l}" y2="${margin.b}"/>
+      ${zPathD ? `<path class="cad-elevation-path" d="${zPathD}" />` : (zSamples.length === 1 ? `<circle class="cad-elevation-dot" cx="${mapD(zSamples[0].d).toFixed(2)}" cy="${mapZv(zSamples[0].z).toFixed(2)}" r="2.8" />` : "")}
+      <text class="cad-elevation-label" x="${margin.l + innerW / 2}" y="${H - 6}" text-anchor="middle">L — chiều dài lộ trình XY (mm)</text>
+      <text class="cad-elevation-label" x="${pad + 8}" y="${zLabY.toFixed(1)}" text-anchor="middle" transform="rotate(-90 ${pad + 8} ${zLabY.toFixed(1)})">Z (mm)</text>
+    </g>`;
+  }
+
+  const p0 = proj({ x: 0, y: 0 });
+  const px = proj({ x: 170, y: 0 });
+  const py = proj({ x: 0, y: 170 });
+  const pxy = proj({ x: 170, y: 170 });
 
   const originMarker = `<g class="cad-workspace-limit">
-    <!-- Vùng giới hạn 170x170 -->
     <polygon points="${p0.x.toFixed(2)},${p0.y.toFixed(2)} ${px.x.toFixed(2)},${px.y.toFixed(2)} ${pxy.x.toFixed(2)},${pxy.y.toFixed(2)} ${py.x.toFixed(2)},${py.y.toFixed(2)}" fill="rgba(255, 255, 255, 0.05)" stroke="rgba(50, 200, 255, 0.5)" stroke-width="1.5" stroke-dasharray="6,4" />
-    
-    <!-- Các đường gióng nằm gọn trong khung giới hạn -->
     <line x1="-10000" y1="${p0.y.toFixed(2)}" x2="10000" y2="${p0.y.toFixed(2)}" stroke="rgba(255, 50, 50, 0.4)" stroke-width="1.5" stroke-dasharray="6,4" />
     <line x1="${p0.x.toFixed(2)}" y1="-10000" x2="${p0.x.toFixed(2)}" y2="10000" stroke="rgba(50, 255, 50, 0.4)" stroke-width="1.5" stroke-dasharray="6,4" />
-    
-    <!-- Mũi tên trục X tại 170 -->
     <polygon points="${px.x.toFixed(2)},${px.y.toFixed(2)} ${(px.x - 10).toFixed(2)},${(px.y - 5).toFixed(2)} ${(px.x - 10).toFixed(2)},${(px.y + 5).toFixed(2)}" fill="rgba(255, 50, 50, 0.8)" />
-    <!-- Mũi tên trục Y tại 170 (chú ý toạ độ Y trên màn hình lộn ngược) -->
     <polygon points="${py.x.toFixed(2)},${py.y.toFixed(2)} ${(py.x - 5).toFixed(2)},${(py.y + 10).toFixed(2)} ${(py.x + 5).toFixed(2)},${(py.y + 10).toFixed(2)}" fill="rgba(50, 255, 50, 0.8)" />
-
-    <!-- Điểm gốc và Text -->
     <circle cx="${p0.x.toFixed(2)}" cy="${p0.y.toFixed(2)}" r="5" fill="none" stroke="yellow" stroke-width="2"/>
     <text x="${p0.x + 8}" y="${p0.y - 8}" fill="yellow" font-size="12" font-family="monospace">X0, Y0</text>
   </g>`;
 
-  dom.cadPreview.innerHTML = `<g id="cad-transform-group" transform="translate(${cadPanX},${cadPanY}) scale(${cadZoom})">${originMarker}<g>${polyM}</g><g>${ptM}</g><g>${aM}</g></g>`;
+  dom.cadPreview.innerHTML = `<g id="cad-transform-group" transform="translate(${cadPanX},${cadPanY}) scale(${cadZoom})">${originMarker}<g>${polyM}</g><g>${ptM}</g><g>${aM}</g></g>${zProfileSvg}`;
 }
 
 function renderTelemetry() {

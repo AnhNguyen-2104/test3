@@ -146,7 +146,7 @@ namespace DACDT_2026
                 if (isArc)
                     AddArcPrimitive(result, frame, startPoint, nextPoint, motion == 2, unitScale, currentF, modalM, frame.P);
                 else if (!AreClose(startPoint, nextPoint))
-                    AddLinePrimitive(result, startPoint, nextPoint, currentF, modalM, frame.P);
+                    AddLinePrimitive(result, startPoint, nextPoint, motion == 0, currentF, modalM, frame.P);
 
                 currentX = nextX;
                 currentY = nextY;
@@ -160,13 +160,14 @@ namespace DACDT_2026
             ParseResult result,
             CadDocumentService.CadCoordinate start,
             CadDocumentService.CadCoordinate end,
+            bool isRapid,
             double? speed = null,
             int? mcode = null,
             double? dwell = null)
         {
             result.Primitives.Add(new CadDocumentService.CadPrimitiveData
             {
-                SourceType = "Line",
+                SourceType = isRapid ? "Line (G0 Rapid)" : "Line (G1)",
                 Points = new List<CadDocumentService.CadCoordinate>
                 {
                     new CadDocumentService.CadCoordinate(start.X, start.Y, start.Z),
@@ -366,7 +367,7 @@ namespace DACDT_2026
 
             foreach (var point in points)
             {
-                string key = MakePointKey(point.X, point.Y);
+                string key = MakePointKey(point.X, point.Y, point.Z);
                 if (!seen.Add(key))
                     continue;
 
@@ -376,8 +377,10 @@ namespace DACDT_2026
                     LineType = "G-code point",
                     X = point.X,
                     Y = point.Y,
+                    Z = point.Z,
                     XDisplay = FormatNumber(point.X),
                     YDisplay = FormatNumber(point.Y),
+                    ZDisplay = FormatNumber(point.Z),
                     Key = key
                 });
             }
@@ -406,7 +409,9 @@ namespace DACDT_2026
                     Right = 100.0,
                     Bottom = 100.0,
                     Width = 100.0,
-                    Height = 100.0
+                    Height = 100.0,
+                    MinZ = 0.0,
+                    MaxZ = 0.0
                 };
             }
 
@@ -414,6 +419,8 @@ namespace DACDT_2026
             double top = allPoints.Min(p => p.Y);
             double right = allPoints.Max(p => p.X);
             double bottom = allPoints.Max(p => p.Y);
+            double minZ = allPoints.Min(p => p.Z);
+            double maxZ = allPoints.Max(p => p.Z);
 
             return new CadDocumentService.CadBounds
             {
@@ -422,7 +429,9 @@ namespace DACDT_2026
                 Right = right,
                 Bottom = bottom,
                 Width = Math.Max(right - left, 1.0),
-                Height = Math.Max(bottom - top, 1.0)
+                Height = Math.Max(bottom - top, 1.0),
+                MinZ = minZ,
+                MaxZ = maxZ
             };
         }
 
@@ -438,7 +447,7 @@ namespace DACDT_2026
         private static void AddPoint(List<CadDocumentService.CadCoordinate> points, CadDocumentService.CadCoordinate point)
         {
             if (points.Count == 0 || !AreClose(points[points.Count - 1], point))
-                points.Add(new CadDocumentService.CadCoordinate(point.X, point.Y));
+                points.Add(new CadDocumentService.CadCoordinate(point.X, point.Y, point.Z));
         }
 
         private static string NormalizeLine(string rawLine)
@@ -484,10 +493,11 @@ namespace DACDT_2026
             CadDocumentService.CadCoordinate first,
             CadDocumentService.CadCoordinate second)
             => Math.Abs(first.X - second.X) < Epsilon
-                && Math.Abs(first.Y - second.Y) < Epsilon;
+                && Math.Abs(first.Y - second.Y) < Epsilon
+                && Math.Abs(first.Z - second.Z) < Epsilon;
 
-        private static string MakePointKey(double x, double y)
-            => string.Format(CultureInfo.InvariantCulture, "{0:0.###}|{1:0.###}", x, y);
+        private static string MakePointKey(double x, double y, double z)
+            => string.Format(CultureInfo.InvariantCulture, "{0:0.###}|{1:0.###}|{2:0.###}", x, y, z);
 
         private static string FormatNumber(double value)
             => value.ToString("0.###", CultureInfo.InvariantCulture);

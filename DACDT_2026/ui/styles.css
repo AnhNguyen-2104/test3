@@ -439,12 +439,54 @@ html.theme-light .data-table th { background: rgba(239, 244, 255, 0.98); }
 
 /* ─── CAD SVG ─── */
 .cad-line { fill: none; stroke: rgba(215,244,255,0.9); stroke-width: 2.2; }
+.cad-line-rapid { fill: none; stroke: rgba(148, 163, 184, 0.95); stroke-width: 1.65; stroke-dasharray: 5 4; }
+.cad-elevation-frame {
+  fill: var(--bg-panel, #0f172a);
+  stroke: var(--border, rgba(148, 163, 184, 0.45));
+  stroke-width: 1;
+}
+.cad-elevation-grid { stroke: rgba(148, 163, 184, 0.18); stroke-width: 1; }
+.cad-elevation-axis { stroke: rgba(148, 163, 184, 0.55); stroke-width: 1.2; }
+.cad-elevation-path { fill: none; stroke: rgba(215, 244, 255, 0.92); stroke-width: 1.85; }
+.cad-elevation-dot { fill: rgba(215, 244, 255, 0.92); stroke: none; }
+.cad-elevation-title { fill: var(--muted, #94a3b8); font-size: 11px; font-family: system-ui, sans-serif; font-weight: 600; }
+.cad-elevation-dim { fill: var(--muted, #94a3b8); font-size: 11px; font-family: ui-monospace, monospace; }
+.cad-elevation-label { fill: var(--muted, #94a3b8); font-size: 10px; font-family: ui-monospace, monospace; }
 .cad-point { fill: #fff0a8; stroke: rgba(0,43,72,0.9); stroke-width: 1.4; cursor: pointer; }
 .cad-point.is-selected { stroke: #ff9d2f; stroke-width: 3; }
 .cad-assignment-text {
   fill: white; font-size: 13px; font-weight: 700;
   text-anchor: middle; dominant-baseline: middle; pointer-events: none;
 }
+
+/* ─── CAD 2D/3D Toggle ─── */
+.cad-view-toggle {
+  display: flex; align-items: center; gap: 4px;
+  padding: 6px 10px 4px 10px;
+}
+.cad-view-btn {
+  border: 1px solid var(--border-strong); border-radius: 6px;
+  background: var(--panel-3); color: var(--muted);
+  font-size: 12px; font-weight: 700; padding: 5px 14px;
+  letter-spacing: 0.5px; cursor: pointer; transition: all 0.2s;
+}
+.cad-view-btn:hover { background: var(--panel-2); color: var(--text); }
+.cad-view-btn.is-active {
+  background: linear-gradient(135deg, var(--brand), var(--brand-strong));
+  color: white; border-color: var(--brand);
+  box-shadow: 0 0 8px rgba(59, 130, 246, 0.35);
+}
+.cad-view-label {
+  margin-left: 8px; font-size: 11px; font-weight: 600; color: var(--muted);
+  letter-spacing: 0.3px;
+}
+
+/* 3D canvas must fill entire preview frame */
+#cad-3d-canvas {
+  position: absolute; inset: 0; width: 100% !important; height: 100% !important;
+  cursor: grab;
+}
+#cad-3d-canvas:active { cursor: grabbing; }
 
 /* ─── Telemetry ─── */
 .telemetry-table { width: 100%; border-collapse: collapse; margin-bottom: 8px; }

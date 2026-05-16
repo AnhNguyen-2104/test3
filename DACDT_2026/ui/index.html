@@ -6,6 +6,14 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Gantry SCADA Robot Control</title>
   <link rel="stylesheet" href="styles.css">
+  <script>
+    window.onerror = function(message, source, lineno, colno, error) {
+        console.error("Global error: ", message, source, lineno, colno, error);
+        alert("Global error: " + message + " at " + source + ":" + lineno);
+    };
+  </script>
+  <script src="three.min.js"></script>
+  <script src="OrbitControls.js"></script>
 </head>
 
 <body>
@@ -237,8 +245,17 @@
 
         <div class="dxf-grid">
           <div class="panel panel-preview">
+            <!-- View mode toggle -->
+            <div class="cad-view-toggle">
+              <button id="cad-view-2d" class="cad-view-btn is-active" title="2D Top-down View">2D</button>
+              <button id="cad-view-3d" class="cad-view-btn" title="3D Perspective View">3D</button>
+              <span class="cad-view-label" id="cad-view-label">XY Projection</span>
+            </div>
             <div class="preview-frame">
+              <!-- 2D SVG View -->
               <svg id="cad-preview" viewBox="0 0 1000 560" preserveAspectRatio="xMidYMid meet"></svg>
+              <!-- 3D Canvas View -->
+              <canvas id="cad-3d-canvas" style="display:none; width:100%; height:100%;"></canvas>
               <div id="cad-placeholder" class="preview-placeholder">View CAD</div>
             </div>
             </div>
@@ -252,10 +269,13 @@
                     <th>Line type</th>
                     <th>Start X</th>
                     <th>Start Y</th>
+                    <th>Start Z</th>
                     <th>End X</th>
                     <th>End Y</th>
+                    <th>End Z</th>
                     <th>Center X</th>
                     <th>Center Y</th>
+                    <th>Center Z</th>
                   </tr>
                 </thead>
                 <tbody id="points-table-body"></tbody>
@@ -316,6 +336,7 @@
   </div>
 
   <script src="app.js"></script>
+  <script src="cad3d.js"></script>
 </body>
 
 </html>

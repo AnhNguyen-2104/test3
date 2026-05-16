@@ -146,7 +146,12 @@ namespace DACDT_2026
                     "DACDT_2026", "WebView2");
                 System.IO.Directory.CreateDirectory(userDataFolder);
 
-                var environment = await Microsoft.Web.WebView2.Core.CoreWebView2Environment.CreateAsync(null, userDataFolder);
+                var options = new Microsoft.Web.WebView2.Core.CoreWebView2EnvironmentOptions
+                {
+                    // Enable WebGL and hardware acceleration for Three.js 3D view
+                    AdditionalBrowserArguments = "--enable-webgl --enable-gpu --ignore-gpu-blocklist --enable-unsafe-webgpu"
+                };
+                var environment = await Microsoft.Web.WebView2.Core.CoreWebView2Environment.CreateAsync(null, userDataFolder, options);
                 await webView.EnsureCoreWebView2Async(environment);
 
                 webView.CoreWebView2.Settings.AreDefaultContextMenusEnabled  = false;

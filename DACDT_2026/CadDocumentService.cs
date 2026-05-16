@@ -207,6 +207,8 @@ namespace DACDT_2026
             public double Bottom { get; set; }
             public double Width { get; set; }
             public double Height { get; set; }
+            public double MinZ { get; set; }
+            public double MaxZ { get; set; }
 
             public static CadBounds FromRectangle(RectangleF bounds)
             {
@@ -217,7 +219,9 @@ namespace DACDT_2026
                     Right = bounds.Right,
                     Bottom = bounds.Bottom,
                     Width = bounds.Width,
-                    Height = bounds.Height
+                    Height = bounds.Height,
+                    MinZ = 0.0,
+                    MaxZ = 0.0
                 };
             }
         }
@@ -240,8 +244,10 @@ namespace DACDT_2026
             public string LineType { get; set; }
             public double X { get; set; }
             public double Y { get; set; }
+            public double Z { get; set; }
             public string XDisplay { get; set; }
             public string YDisplay { get; set; }
+            public string ZDisplay { get; set; }
             public string Key { get; set; }
         }
 
@@ -350,8 +356,10 @@ namespace DACDT_2026
                         LineType = point.DisplayType,
                         X = point.Point.X,
                         Y = point.Point.Y,
+                        Z = 0.0,
                         XDisplay = point.Point.X.ToString("0.###", CultureInfo.InvariantCulture),
                         YDisplay = point.Point.Y.ToString("0.###", CultureInfo.InvariantCulture),
+                        ZDisplay = "0",
                         Key = MakePointKey(point.Point)
                     });
                 }

@@ -96,7 +96,7 @@ namespace DACDT_2026
                 offsetX,
                 offsetY,
                 bounds   = activeCadDocument == null
-                    ? (object)new { left = 0.0, top = 0.0, right = 100.0, bottom = 100.0, width = 100.0, height = 100.0 }
+                    ? (object)new { left = 0.0, top = 0.0, right = 100.0, bottom = 100.0, width = 100.0, height = 100.0, minZ = 0.0, maxZ = 0.0 }
                     : new
                     {
                         left   = activeCadDocument.Bounds.Left,
@@ -104,15 +104,17 @@ namespace DACDT_2026
                         right  = activeCadDocument.Bounds.Right,
                         bottom = activeCadDocument.Bounds.Bottom,
                         width  = activeCadDocument.Bounds.Width,
-                        height = activeCadDocument.Bounds.Height
+                        height = activeCadDocument.Bounds.Height,
+                        minZ   = activeCadDocument.Bounds.MinZ,
+                        maxZ   = activeCadDocument.Bounds.MaxZ
                     },
                 primitives = activeCadDocument == null
                     ? new System.Collections.Generic.List<object>()
                     : activeCadDocument.Primitives.Select(p => (object)new
                     {
                         sourceType = p.SourceType,
-                        points     = p.Points.Select(pt => new { x = pt.X, y = pt.Y }).ToList(),
-                        center     = p.Center != null ? new { x = p.Center.X, y = p.Center.Y } : (object)null,
+                        points     = p.Points.Select(pt => new { x = pt.X, y = pt.Y, z = pt.Z }).ToList(),
+                        center     = p.Center != null ? new { x = p.Center.X, y = p.Center.Y, z = p.Center.Z } : (object)null,
                         isCw       = p.IsCw,
                         isCircle   = p.IsCircle
                     }).ToList(),
@@ -124,8 +126,10 @@ namespace DACDT_2026
                         lineType = pt.LineType,
                         x        = pt.X,
                         y        = pt.Y,
+                        z        = pt.Z,
                         xDisplay = pt.XDisplay,
                         yDisplay = pt.YDisplay,
+                        zDisplay = pt.ZDisplay,
                         key      = pt.Key
                     }).ToList(),
                 selectedPointKey  = selectedCadPointKey ?? string.Empty,

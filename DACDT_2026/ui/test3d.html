@@ -1,0 +1,13 @@
+﻿<!DOCTYPE html>
+<html><head>
+<script src="three.min.js"></script>
+<script src="OrbitControls.js"></script>
+</head><body>
+<script>
+  try {
+    var ok = typeof THREE !== 'undefined' ? 'THREE OK' : 'THREE MISSING';
+    var oc = typeof THREE !== 'undefined' && THREE.OrbitControls ? 'OrbitControls OK' : 'OrbitControls MISSING';
+    document.body.innerHTML = '<pre>' + ok + '\n' + oc + '</pre>';
+  } catch(e) { document.body.innerHTML = '<pre>ERROR: ' + e + '</pre>'; }
+</script>
+</body></html>
