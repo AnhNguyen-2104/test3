@@ -121,12 +121,14 @@ namespace DACDT_2026
             else if (s.Contains("circle"))
                 da2 = s.Contains("ccw") ? 0x10 : 0x0F;                                      // circle default CW
             else if (s.Contains("linear3") || s.Contains("3-axis"))
-                da2 = 0x0B;                                                                  // ABS_Linear3 (3-axis interpolation)
+                da2 = 0x15;                                                                  // ABS_Linear3 (3-axis interpolation) = 0x15 = 21
             else
                 da2 = 0x0A;                                                                  // ABS_Linear2 (2-axis interpolation)
 
             // ── Da.5 Partner axis (b3–b2), Da.3 Acc (b5–b4), Da.4 Dec (b7–b6) ──
-            int da5 = partnerAxis & 0x03;
+            // Với 3-axis interpolation (Linear3): Da.5 không cần thiết → = 0
+            bool is3Axis = s.Contains("linear3") || s.Contains("3-axis");
+            int da5 = is3Axis ? 0 : (partnerAxis & 0x03);
             int da3 = accelTimeNo & 0x03;
             int da4 = decelTimeNo & 0x03;
 
