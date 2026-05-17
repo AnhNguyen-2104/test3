@@ -289,16 +289,34 @@ namespace DACDT_2026
 
             try
             {
-                if (webView == null || webView.IsDisposed || webView.CoreWebView2 == null) return Task.CompletedTask;
+                // Phải chạy trên UI thread — dùng BeginInvoke nếu đang ở thread khác
+                if (webView == null || webView.IsDisposed) return Task.CompletedTask;
 
-                string json = serializer.Serialize(new { type, payload });
-                webView.CoreWebView2.PostWebMessageAsJson(json);
+                Action post = () =>
+                {
+                    try
+                    {
+                        if (isClosing || webView == null || webView.IsDisposed || webView.CoreWebView2 == null)
+                            return;
+                        string json = serializer.Serialize(new { type, payload });
+                        webView.CoreWebView2.PostWebMessageAsJson(json);
+                    }
+                    catch (Exception ex)
+                    {
+                        System.Diagnostics.Debug.WriteLine("PostToUiAsync (inner) error: " + ex.Message);
+                    }
+                };
+
+                if (webView.InvokeRequired)
+                    webView.BeginInvoke(post);
+                else
+                    post();
             }
             catch (Exception ex)
             {
                 System.Diagnostics.Debug.WriteLine("PostToUiAsync error: " + ex.Message);
             }
-            
+
             return Task.CompletedTask;
         }
 

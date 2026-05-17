@@ -23,87 +23,95 @@ namespace DACDT_2026
         // ── Open DXF ────────────────────────────────────────────────────────────
         private async Task HandleOpenDxfAsync()
         {
-            using (var dialog = new OpenFileDialog())
+            // ShowDialog phải chạy trên UI thread — dùng Invoke để đảm bảo
+            string selectedPath = null;
+            string initialDir   = activeCadDocument?.DirectoryPath;
+
+            this.Invoke(new Action(() =>
             {
-                dialog.Filter        = "CAD / G-code files (*.dxf;*.gcode;*.g;*.gc;*.nc;*.ngc;*.cnc;*.tap)|*.dxf;*.gcode;*.g;*.gc;*.nc;*.ngc;*.cnc;*.tap|DXF files (*.dxf)|*.dxf|G-code files (*.gcode;*.g;*.gc;*.nc;*.ngc;*.cnc;*.tap)|*.gcode;*.g;*.gc;*.nc;*.ngc;*.cnc;*.tap|All files (*.*)|*.*";
-                dialog.Title         = "Open DXF or G-code file";
-                dialog.CheckFileExists = true;
-                dialog.Multiselect   = false;
-                dialog.RestoreDirectory = true;
-                dialog.FileName      = string.Empty;
-
-                if (!string.IsNullOrWhiteSpace(activeCadDocument?.DirectoryPath)
-                    && Directory.Exists(activeCadDocument.DirectoryPath))
-                    dialog.InitialDirectory = activeCadDocument.DirectoryPath;
-
-                if (dialog.ShowDialog(this) != DialogResult.OK) return;
-
-                try
+                using (var dialog = new OpenFileDialog())
                 {
-                    string selectedPath = Path.GetFullPath(dialog.FileName);
-                    bool isGcode = IsGcodeFile(selectedPath);
-                    string sourceName = isGcode ? "GCODE" : "DXF";
-                    AddLogEntry(sourceName, selectedPath, "Read", "Selected", "OpenFileDialog");
+                    dialog.Filter           = "CAD / G-code files (*.dxf;*.gcode;*.g;*.gc;*.nc;*.ngc;*.cnc;*.tap)|*.dxf;*.gcode;*.g;*.gc;*.nc;*.ngc;*.cnc;*.tap|DXF files (*.dxf)|*.dxf|G-code files (*.gcode;*.g;*.gc;*.nc;*.ngc;*.cnc;*.tap)|*.gcode;*.g;*.gc;*.nc;*.ngc;*.cnc;*.tap|All files (*.*)|*.*";
+                    dialog.Title            = "Open DXF or G-code file";
+                    dialog.CheckFileExists  = true;
+                    dialog.Multiselect      = false;
+                    dialog.RestoreDirectory = true;
+                    dialog.FileName         = string.Empty;
 
-                    ClearLoadedFileState();
+                    if (!string.IsNullOrWhiteSpace(initialDir) && Directory.Exists(initialDir))
+                        dialog.InitialDirectory = initialDir;
 
+                    if (dialog.ShowDialog(this) == DialogResult.OK)
+                        selectedPath = Path.GetFullPath(dialog.FileName);
+                }
+            }));
+
+            if (string.IsNullOrEmpty(selectedPath)) return;
+
+            try
+            {
+                bool   isGcode    = IsGcodeFile(selectedPath);
+                string sourceName = isGcode ? "GCODE" : "DXF";
+                AddLogEntry(sourceName, selectedPath, "Read", "Selected", "OpenFileDialog");
+
+                ClearLoadedFileState();
+
+                // ── Parse file trên background thread để không block UI ──────────
+                CadDocumentService.CadLoadResult loadedDoc = null;
+                string loadedGcodeText = string.Empty;
+
+                await Task.Run(() =>
+                {
                     if (isGcode)
                     {
-                        rawGcodeText = File.ReadAllText(selectedPath);
-                        LoadGcodeCoordinatesAsCad(selectedPath);
+                        loadedGcodeText = File.ReadAllText(selectedPath);
+                        loadedDoc = gcodeCoordinateService.LoadAsCad(selectedPath);
                     }
                     else
                     {
-                        rawGcodeText = string.Empty;
-                        LoadCadDocument(selectedPath);
+                        loadedDoc = cadService.Load(selectedPath);
                     }
 
-                    if (activeCadDocument?.Primitives != null)
+                    // Kết nối các đoạn thành path liên tục (O(n²)) — chạy nền
+                    if (loadedDoc?.Primitives != null && loadedDoc.Primitives.Count > 0)
                     {
-                        var paths = GetConnectedPathsFromCad(activeCadDocument.Primitives);
-                        activeCadDocument.Primitives.Clear();
+                        var paths = GetConnectedPathsFromCad(loadedDoc.Primitives);
+                        loadedDoc.Primitives.Clear();
                         foreach (var path in paths)
-                            activeCadDocument.Primitives.AddRange(path);
+                            loadedDoc.Primitives.AddRange(path);
                     }
+                });
 
-                    currentView = "dxf";
-                    await PushDxfStateAsync();
-                    AddLogEntry(sourceName, activeCadDocument?.FilePath ?? selectedPath, "Read", "OK",
-                        $"Loaded file: {activeCadDocument?.FileName ?? Path.GetFileName(selectedPath)}");
-                    await NotifyAsync("success", sourceName,
-                        $"Loaded: {activeCadDocument?.FileName ?? Path.GetFileName(selectedPath)}");
+                // ── Cập nhật state trên UI thread ────────────────────────────────
+                activeCadDocument    = loadedDoc;
+                rawGcodeText         = loadedGcodeText;
+                activeDocumentKind   = isGcode ? "GCODE" : "DXF";
+                selectedCadPointKey  = activeCadDocument?.Points?.FirstOrDefault()?.Key;
+                assignedPointKeys.Clear();
 
-                    // Bỏ qua nhấn Import: Tự động chạy Import ngay sau khi load xong DXF
-                    await HandleImportCadToProcessAsync();
-                    
-                    // Tự động quét toạ độ kiểm tra hành trình
-                    await HandleScanLimitsAsync();
-                }
-                catch (Exception ex)
+                if (isGcode)
                 {
-                    await NotifyAsync("error", "DXF/G-code", ex.Message);
+                    var firstSpeed = activeCadDocument?.Primitives?.FirstOrDefault(p => !string.IsNullOrEmpty(p.Speed))?.Speed;
+                    if (!string.IsNullOrEmpty(firstSpeed))
+                        globalSpeed = firstSpeed;
                 }
+
+                currentView = "dxf";
+                await PushDxfStateAsync();
+
+                AddLogEntry(sourceName, activeCadDocument?.FilePath ?? selectedPath, "Read", "OK",
+                    $"Loaded file: {activeCadDocument?.FileName ?? Path.GetFileName(selectedPath)}");
+                await NotifyAsync("success", sourceName,
+                    $"Loaded: {activeCadDocument?.FileName ?? Path.GetFileName(selectedPath)}");
+
+                // Tự động Import và quét giới hạn
+                await HandleImportCadToProcessAsync();
+                await HandleScanLimitsAsync();
             }
-        }
-
-        private void LoadCadDocument(string filePath)
-        {
-            activeCadDocument = cadService.Load(filePath);
-            activeDocumentKind = "DXF";
-            selectedCadPointKey = activeCadDocument.Points.FirstOrDefault()?.Key;
-            assignedPointKeys.Clear();
-        }
-
-        private void LoadGcodeCoordinatesAsCad(string filePath)
-        {
-            activeCadDocument = gcodeCoordinateService.LoadAsCad(filePath);
-            activeDocumentKind = "GCODE";
-            selectedCadPointKey = activeCadDocument.Points.FirstOrDefault()?.Key;
-            assignedPointKeys.Clear();
-
-            var firstSpeed = activeCadDocument.Primitives?.FirstOrDefault(p => !string.IsNullOrEmpty(p.Speed))?.Speed;
-            if (!string.IsNullOrEmpty(firstSpeed))
-                globalSpeed = firstSpeed;
+            catch (Exception ex)
+            {
+                await NotifyAsync("error", "DXF/G-code", ex.Message);
+            }
         }
 
         private void ClearLoadedFileState()
@@ -117,45 +125,56 @@ namespace DACDT_2026
 
         private async Task HandlePreviewGcodeAsync(string text)
         {
-            if (activeDocumentKind == "GCODE")
+            if (activeDocumentKind != "GCODE") return;
+
+            try
             {
-                try
-                {
-                    rawGcodeText = text;
-                    string path = activeCadDocument?.FilePath;
-                    if (string.IsNullOrEmpty(path)) path = null;
-                    activeCadDocument = gcodeCoordinateService.LoadAsCadFromText(text, path);
-                    
-                    var firstSpeed = activeCadDocument.Primitives?.FirstOrDefault(p => !string.IsNullOrEmpty(p.Speed))?.Speed;
-                    if (!string.IsNullOrEmpty(firstSpeed))
-                        globalSpeed = firstSpeed;
+                rawGcodeText = text;
+                string path = activeCadDocument?.FilePath;
+                if (string.IsNullOrEmpty(path)) path = null;
 
-                    if (activeCadDocument?.Primitives != null)
+                // Parse trên background thread
+                CadDocumentService.CadLoadResult previewDoc = null;
+                await Task.Run(() =>
+                {
+                    previewDoc = gcodeCoordinateService.LoadAsCadFromText(text, path);
+
+                    if (previewDoc?.Primitives != null && previewDoc.Primitives.Count > 0)
                     {
-                        var paths = GetConnectedPathsFromCad(activeCadDocument.Primitives);
-                        activeCadDocument.Primitives.Clear();
+                        var paths = GetConnectedPathsFromCad(previewDoc.Primitives);
+                        previewDoc.Primitives.Clear();
                         foreach (var pathList in paths)
-                            activeCadDocument.Primitives.AddRange(pathList);
+                            previewDoc.Primitives.AddRange(pathList);
                     }
+                });
 
-                    await PushDxfStateAsync();
-                    await HandleImportCadToProcessAsync();
-                    await HandleScanLimitsAsync();
-                }
-                catch(Exception ex)
-                {
-                    // Ignore preview errors if typing incomplete
-                }
+                activeCadDocument = previewDoc;
+
+                var firstSpeed = activeCadDocument?.Primitives?.FirstOrDefault(p => !string.IsNullOrEmpty(p.Speed))?.Speed;
+                if (!string.IsNullOrEmpty(firstSpeed))
+                    globalSpeed = firstSpeed;
+
+                await PushDxfStateAsync();
+                await HandleImportCadToProcessAsync();
+                await HandleScanLimitsAsync();
+            }
+            catch
+            {
+                // Ignore preview errors if typing incomplete
             }
         }
 
         private async Task HandleNewGcodeAsync()
         {
             ClearLoadedFileState();
-            rawGcodeText = string.Empty;
+            rawGcodeText     = string.Empty;
             activeDocumentKind = "GCODE";
-            activeCadDocument = gcodeCoordinateService.LoadAsCadFromText("");
-            
+
+            await Task.Run(() =>
+            {
+                activeCadDocument = gcodeCoordinateService.LoadAsCadFromText("");
+            });
+
             await PushDxfStateAsync();
             await HandleImportCadToProcessAsync();
             await NotifyAsync("info", "G-code", "Đã tạo phiên bản G-code trống.");
@@ -163,44 +182,41 @@ namespace DACDT_2026
 
         private async Task HandleSaveGcodeAsync(string text)
         {
-            if (activeDocumentKind == "GCODE" && activeCadDocument != null)
+            if (activeDocumentKind != "GCODE" || activeCadDocument == null) return;
+
+            try
             {
-                try
+                string path = activeCadDocument.FilePath;
+                if (string.IsNullOrEmpty(path) || path == "Untitled")
                 {
-                    string path = activeCadDocument.FilePath;
-                    if (string.IsNullOrEmpty(path) || path == "Untitled")
+                    // SaveFileDialog phải chạy trên UI thread
+                    string selectedPath = null;
+                    this.Invoke(new Action(() =>
                     {
-                        string selectedPath = null;
-                        this.Invoke(new Action(() =>
+                        using (var sfd = new SaveFileDialog())
                         {
-                            using (var sfd = new SaveFileDialog())
-                            {
-                                sfd.Filter = "G-code files (*.gcode;*.nc;*.txt)|*.gcode;*.nc;*.txt|All files (*.*)|*.*";
-                                sfd.Title = "Save New G-code";
-                                sfd.FileName = "New_GCode_" + DateTime.Now.ToString("yyyyMMdd_HHmmss") + ".gcode";
-                                if (sfd.ShowDialog() == DialogResult.OK)
-                                {
-                                    selectedPath = sfd.FileName;
-                                }
-                            }
-                        }));
+                            sfd.Filter   = "G-code files (*.gcode;*.nc;*.txt)|*.gcode;*.nc;*.txt|All files (*.*)|*.*";
+                            sfd.Title    = "Save New G-code";
+                            sfd.FileName = "New_GCode_" + DateTime.Now.ToString("yyyyMMdd_HHmmss") + ".gcode";
+                            if (sfd.ShowDialog(this) == DialogResult.OK)
+                                selectedPath = sfd.FileName;
+                        }
+                    }));
 
-                        if (string.IsNullOrEmpty(selectedPath))
-                            return; // User cancelled
+                    if (string.IsNullOrEmpty(selectedPath)) return;
 
-                        path = selectedPath;
-                        activeCadDocument.FilePath = path;
-                        activeCadDocument.FileName = Path.GetFileName(path);
-                    }
-                    
-                    File.WriteAllText(path, text);
-                    await HandlePreviewGcodeAsync(text);
-                    await NotifyAsync("success", "G-code", $"Lưu G-code thành công tại:\n{path}");
+                    path = selectedPath;
+                    activeCadDocument.FilePath = path;
+                    activeCadDocument.FileName = Path.GetFileName(path);
                 }
-                catch(Exception ex)
-                {
-                    await NotifyAsync("error", "G-code", "Lỗi khi lưu G-code: " + ex.Message);
-                }
+
+                await Task.Run(() => File.WriteAllText(path, text));
+                await HandlePreviewGcodeAsync(text);
+                await NotifyAsync("success", "G-code", $"Lưu G-code thành công tại:\n{path}");
+            }
+            catch (Exception ex)
+            {
+                await NotifyAsync("error", "G-code", "Lỗi khi lưu G-code: " + ex.Message);
             }
         }
 
@@ -349,17 +365,9 @@ namespace DACDT_2026
                 return;
             }
 
-            var rows = BuildConnectedPathsFromCad();
-            if (rows.Count == 0)
-            {
-                await NotifyAsync("info", "DXF", "No valid paths found.");
-                return;
-            }
-
-            // Assign M-code for glue on/off points
+            // Snapshot các giá trị cần dùng trong background thread
             string glueStartCoord = null;
             string glueEndCoord   = null;
-
             if (assignedPointKeys.TryGetValue("glueStart", out string gStartKey))
             {
                 var pt = activeCadDocument.Points.FirstOrDefault(p => p.Key == gStartKey);
@@ -371,6 +379,19 @@ namespace DACDT_2026
                 if (pt != null) glueEndCoord = FormatPoint(pt);
             }
 
+            bool isGcodeDoc  = string.Equals(activeDocumentKind, "GCODE", StringComparison.OrdinalIgnoreCase);
+            string snapSpeed = globalSpeed;
+
+            // Build rows trên background thread
+            List<ProcessRow> rows = null;
+            await Task.Run(() => { rows = BuildConnectedPathsFromCad(); });
+
+            if (rows == null || rows.Count == 0)
+            {
+                await NotifyAsync("info", "DXF", "No valid paths found.");
+                return;
+            }
+
             foreach (var row in rows)
             {
                 if (glueStartCoord != null && string.Equals(row.EndCoordinate, glueStartCoord))
@@ -378,9 +399,8 @@ namespace DACDT_2026
                 if (glueEndCoord != null && string.Equals(row.EndCoordinate, glueEndCoord))
                     row.MCodeValue = "2";
 
-                // Lấy giá trị speed mặc định từ ô mới (chỉ áp dụng cho DXF)
-                if (string.IsNullOrEmpty(row.Speed) && activeDocumentKind != "GCODE")
-                    row.Speed = globalSpeed;
+                if (string.IsNullOrEmpty(row.Speed) && !isGcodeDoc)
+                    row.Speed = snapSpeed;
             }
 
             processRows.Clear();
