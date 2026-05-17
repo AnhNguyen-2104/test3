@@ -276,7 +276,13 @@ function handleHostMessage(msg) {
   if (!msg || !msg.type) return;
   switch (msg.type) {
     case "controlState":
+      const prevEvents = (state.control && state.control.events) ? state.control.events : [];
       state.control = msg.payload || state.control;
+      // Giữ lại events cũ — không để server ghi đè (server luôn gửi events=[])
+      if (!state.control.events || state.control.events.length === 0)
+        state.control.events = prevEvents;
+      else
+        state.control.events = state.control.events.concat(prevEvents).slice(0, 500);
       state.view = state.control.view || state.view;
       state.theme = state.control.theme || state.theme;
       applyTheme(state.theme); applyView(state.view); renderControl(); break;
@@ -376,7 +382,7 @@ function renderEvents() {
     dom.eventsList.innerHTML = '<div class="events-empty">No events yet.</div>';
     return;
   }
-  dom.eventsList.innerHTML = events.slice(0, 50).map(ev =>
+  dom.eventsList.innerHTML = events.slice(0, 500).map(ev =>
     `<div class="event-row"><span class="event-time">${esc(ev.time || "")}</span><span class="event-tag ${esc(ev.kind || "info")}">${esc(ev.tag || ev.kind || "Info")}</span><span class="event-msg">${esc(ev.message || "")}</span></div>`
   ).join("");
 }
@@ -384,9 +390,9 @@ function renderEvents() {
 function addLocalEvent(kind, title, message) {
   if (!state.control.events) state.control.events = [];
   const now = new Date();
-  const time = now.toTimeString().substring(0, 5);
+  const time = now.toTimeString().substring(0, 8); // HH:MM:SS
   state.control.events.unshift({ time, kind: kind || "info", tag: title || "Info", message: message || "" });
-  if (state.control.events.length > 100) state.control.events.length = 100;
+  if (state.control.events.length > 500) state.control.events.length = 500;
   renderEvents();
 }
 

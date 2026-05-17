@@ -598,7 +598,7 @@ namespace DACDT_2026
                             CenterCoordinate = string.Empty,
                             MCodeValue       = (!isGcodeDocument && pathClosed) ? "1" : string.Empty
                         };
-                        ApplyPrimitiveExtraData(startRow, prim);
+                        ApplyPrimitiveExtraData(startRow, prim, isGcodeDocument);
                         result.Add(startRow);
                     }
 
@@ -616,7 +616,7 @@ namespace DACDT_2026
                                     "{0:0.###};{1:0.###}", prim.Points[i].X, prim.Points[i].Y),
                                 CenterCoordinate = string.Empty
                             };
-                            ApplyPrimitiveExtraData(row, prim);
+                            ApplyPrimitiveExtraData(row, prim, isGcodeDocument);
                             if (!isGcodeDocument && pathClosed && isLastInPath && isLastInPrim)
                                 row.MCodeValue = "2";
                             result.Add(row);
@@ -637,7 +637,7 @@ namespace DACDT_2026
                         if (prim.Center != null)
                             row.CenterCoordinate = string.Format(CultureInfo.InvariantCulture,
                                 "{0:0.###};{1:0.###}", prim.Center.X, prim.Center.Y);
-                        ApplyPrimitiveExtraData(row, prim);
+                        ApplyPrimitiveExtraData(row, prim, isGcodeDocument);
                         if (!isGcodeDocument && pathClosed && isLastInPath)
                             row.MCodeValue = "2";
                         result.Add(row);
@@ -723,9 +723,10 @@ namespace DACDT_2026
             return AreClose(first.Points.First(), last.Points.Last());
         }
 
-        private static void ApplyPrimitiveExtraData(ProcessRow row, CadDocumentService.CadPrimitiveData primitive)
+        private static void ApplyPrimitiveExtraData(ProcessRow row, CadDocumentService.CadPrimitiveData primitive, bool isGcode = false)
         {
-            if (!string.IsNullOrWhiteSpace(primitive?.MCodeValue))
+            // M code từ G-code file không gửi xuống PLC — chỉ áp dụng cho DXF
+            if (!isGcode && !string.IsNullOrWhiteSpace(primitive?.MCodeValue))
                 row.MCodeValue = primitive.MCodeValue;
             if (!string.IsNullOrWhiteSpace(primitive?.Speed))
                 row.Speed = primitive.Speed;
