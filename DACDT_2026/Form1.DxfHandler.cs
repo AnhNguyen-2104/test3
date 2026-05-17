@@ -23,28 +23,33 @@ namespace DACDT_2026
         // ── Open DXF ────────────────────────────────────────────────────────────
         private async Task HandleOpenDxfAsync()
         {
-            // ShowDialog phải chạy trên UI thread — dùng Invoke để đảm bảo
+            // ShowDialog phải chạy trên UI thread
+            // CoreWebView2_WebMessageReceived đã chạy trên UI thread nên không cần Invoke
+            // Nhưng nếu vì lý do nào đó bị gọi từ thread khác thì dùng BeginInvoke
+            if (this.InvokeRequired)
+            {
+                this.BeginInvoke(new Action(async () => await HandleOpenDxfAsync()));
+                return;
+            }
+
             string selectedPath = null;
             string initialDir   = activeCadDocument?.DirectoryPath;
 
-            this.Invoke(new Action(() =>
+            using (var dialog = new OpenFileDialog())
             {
-                using (var dialog = new OpenFileDialog())
-                {
-                    dialog.Filter           = "CAD / G-code files (*.dxf;*.gcode;*.g;*.gc;*.nc;*.ngc;*.cnc;*.tap)|*.dxf;*.gcode;*.g;*.gc;*.nc;*.ngc;*.cnc;*.tap|DXF files (*.dxf)|*.dxf|G-code files (*.gcode;*.g;*.gc;*.nc;*.ngc;*.cnc;*.tap)|*.gcode;*.g;*.gc;*.nc;*.ngc;*.cnc;*.tap|All files (*.*)|*.*";
-                    dialog.Title            = "Open DXF or G-code file";
-                    dialog.CheckFileExists  = true;
-                    dialog.Multiselect      = false;
-                    dialog.RestoreDirectory = true;
-                    dialog.FileName         = string.Empty;
+                dialog.Filter           = "CAD / G-code files (*.dxf;*.gcode;*.g;*.gc;*.nc;*.ngc;*.cnc;*.tap)|*.dxf;*.gcode;*.g;*.gc;*.nc;*.ngc;*.cnc;*.tap|DXF files (*.dxf)|*.dxf|G-code files (*.gcode;*.g;*.gc;*.nc;*.ngc;*.cnc;*.tap)|*.gcode;*.g;*.gc;*.nc;*.ngc;*.cnc;*.tap|All files (*.*)|*.*";
+                dialog.Title            = "Open DXF or G-code file";
+                dialog.CheckFileExists  = true;
+                dialog.Multiselect      = false;
+                dialog.RestoreDirectory = true;
+                dialog.FileName         = string.Empty;
 
-                    if (!string.IsNullOrWhiteSpace(initialDir) && Directory.Exists(initialDir))
-                        dialog.InitialDirectory = initialDir;
+                if (!string.IsNullOrWhiteSpace(initialDir) && Directory.Exists(initialDir))
+                    dialog.InitialDirectory = initialDir;
 
-                    if (dialog.ShowDialog(this) == DialogResult.OK)
-                        selectedPath = Path.GetFullPath(dialog.FileName);
-                }
-            }));
+                if (dialog.ShowDialog(this) == DialogResult.OK)
+                    selectedPath = Path.GetFullPath(dialog.FileName);
+            }
 
             if (string.IsNullOrEmpty(selectedPath)) return;
 
@@ -191,7 +196,22 @@ namespace DACDT_2026
                 {
                     // SaveFileDialog phải chạy trên UI thread
                     string selectedPath = null;
-                    this.Invoke(new Action(() =>
+
+                    if (this.InvokeRequired)
+                    {
+                        this.Invoke(new Action(() =>
+                        {
+                            using (var sfd = new SaveFileDialog())
+                            {
+                                sfd.Filter   = "G-code files (*.gcode;*.nc;*.txt)|*.gcode;*.nc;*.txt|All files (*.*)|*.*";
+                                sfd.Title    = "Save New G-code";
+                                sfd.FileName = "New_GCode_" + DateTime.Now.ToString("yyyyMMdd_HHmmss") + ".gcode";
+                                if (sfd.ShowDialog(this) == DialogResult.OK)
+                                    selectedPath = sfd.FileName;
+                            }
+                        }));
+                    }
+                    else
                     {
                         using (var sfd = new SaveFileDialog())
                         {
@@ -201,7 +221,7 @@ namespace DACDT_2026
                             if (sfd.ShowDialog(this) == DialogResult.OK)
                                 selectedPath = sfd.FileName;
                         }
-                    }));
+                    }
 
                     if (string.IsNullOrEmpty(selectedPath)) return;
 
