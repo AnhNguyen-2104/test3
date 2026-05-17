@@ -79,7 +79,8 @@ function cacheDom() {
   dom.offsetXInput = document.getElementById("offset-x-input");
   dom.offsetYInput = document.getElementById("offset-y-input");
   dom.applyOffsetBtn = document.getElementById("apply-offset-btn");
-  dom.sendRowCount = document.getElementById("send-row-count");
+  dom.sendRowCount   = document.getElementById("send-row-count");
+  dom.viewSettings   = document.getElementById("view-settings");
 }
 
 function bindEvents() {
@@ -270,6 +271,41 @@ function bindEvents() {
   dom.modalConfirm.addEventListener("click", submitPrompt);
   dom.modal.addEventListener("click", e => { if (e.target === dom.modal) closePrompt(); });
   dom.modalInput.addEventListener("keydown", e => { if (e.key === "Enter") submitPrompt(); if (e.key === "Escape") closePrompt(); });
+
+  // ── Settings buttons ─────────────────────────────────────────────────────
+  const g0SpeedBtn = document.getElementById("set-g0-speed-btn");
+  if (g0SpeedBtn) {
+    g0SpeedBtn.addEventListener("click", () => {
+      const val = parseInt((document.getElementById("g0-speed-input") || {}).value, 10);
+      if (!val || val < 1) return;
+      post("setG0Speed", { value: val });
+      const st = document.getElementById("g0-speed-status");
+      if (st) { st.textContent = "✓ " + val + " mm/min"; setTimeout(() => { st.textContent = ""; }, 3000); }
+    });
+  }
+
+  const plcConnBtn = document.getElementById("set-plc-conn-btn");
+  if (plcConnBtn) {
+    plcConnBtn.addEventListener("click", () => {
+      const ip   = (document.getElementById("plc-ip-input")   || {}).value || "";
+      const port = parseInt((document.getElementById("plc-port-input") || {}).value, 10) || 3000;
+      if (!ip) return;
+      post("setPlcConnection", { ip, port });
+      const st = document.getElementById("plc-conn-status");
+      if (st) { st.textContent = "✓ Đã lưu — kết nối lại để áp dụng"; setTimeout(() => { st.textContent = ""; }, 4000); }
+    });
+  }
+
+  const zOffsetsBtn = document.getElementById("set-z-offsets-btn");
+  if (zOffsetsBtn) {
+    zOffsetsBtn.addEventListener("click", () => {
+      const zDown = parseFloat((document.getElementById("z-down-input") || {}).value) || 0;
+      const zSafe = parseFloat((document.getElementById("z-safe-input") || {}).value) || 5;
+      post("setZOffsets", { zDown, zSafe });
+      const st = document.getElementById("z-offsets-status");
+      if (st) { st.textContent = "✓ Z Down=" + zDown + " Z Safe=" + zSafe; setTimeout(() => { st.textContent = ""; }, 3000); }
+    });
+  }
 }
 
 function handleHostMessage(msg) {
@@ -609,10 +645,11 @@ function renderLogs() {
 function applyTheme(t) { dom.html.classList.toggle("theme-dark", t === "dark"); dom.html.classList.toggle("theme-light", t !== "dark"); dom.themeToggle.textContent = t === "dark" ? "◐" : "◑"; }
 function applyView(v) {
   state.view = v;
-  dom.viewControl && dom.viewControl.classList.toggle("is-active", v === "control");
-  dom.viewLogs && dom.viewLogs.classList.toggle("is-active", v === "logs");
+  dom.viewControl  && dom.viewControl.classList.toggle("is-active",  v === "control");
+  dom.viewLogs     && dom.viewLogs.classList.toggle("is-active",     v === "logs");
   dom.viewTelemetry && dom.viewTelemetry.classList.toggle("is-active", v === "telemetry");
-  dom.viewDxf && dom.viewDxf.classList.toggle("is-active", v === "dxf");
+  dom.viewDxf      && dom.viewDxf.classList.toggle("is-active",      v === "dxf");
+  dom.viewSettings && dom.viewSettings.classList.toggle("is-active", v === "settings");
   updateNavState();
 }
 function updateNavState() { const s = b => { b.classList.toggle("is-active", b.dataset.view === state.view); }; dom.topViewButtons.forEach(s); dom.sideViewButtons.forEach(s); }

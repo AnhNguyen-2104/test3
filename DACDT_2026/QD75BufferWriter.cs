@@ -120,14 +120,14 @@ namespace DACDT_2026
             else if (s.Contains("arc ccw") || s.Contains("arc circular left"))  da2 = 0x10; // ABS_CircularLeft
             else if (s.Contains("circle"))
                 da2 = s.Contains("ccw") ? 0x10 : 0x0F;                                      // circle default CW
-            else if (s.Contains("linear3") || s.Contains("3-axis"))
-                da2 = 0x15;                                                                  // ABS_Linear3 (3-axis interpolation) = 0x15 = 21
+            else if (s.Contains("linear3") || s.Contains("3-axis") || s.Contains("rapid3"))
+                da2 = 0x15;                                                                  // ABS_Linear3 (3-axis) = 0x15
             else
                 da2 = 0x0A;                                                                  // ABS_Linear2 (2-axis interpolation)
 
             // ── Da.5 Partner axis (b3–b2), Da.3 Acc (b5–b4), Da.4 Dec (b7–b6) ──
-            // Với 3-axis interpolation (Linear3): Da.5 không cần thiết → = 0
-            bool is3Axis = s.Contains("linear3") || s.Contains("3-axis");
+            // Với 3-axis interpolation (Linear3/Rapid3): Da.5 không cần thiết → = 0
+            bool is3Axis = s.Contains("linear3") || s.Contains("3-axis") || s.Contains("rapid3");
             int da5 = is3Axis ? 0 : (partnerAxis & 0x03);
             int da3 = accelTimeNo & 0x03;
             int da4 = decelTimeNo & 0x03;
@@ -597,12 +597,18 @@ namespace DACDT_2026
                 int blockOffset = i * Stride;
 
                 // 1. Positioning Identifier (16-bit)
-                // Nếu có Z → dùng Linear3 (Da.2=0x0B), ngược lại dùng MotionType gốc
+                // Rapid3 → luôn Linear3. Line có Z → Linear3. Còn lại → MotionType gốc.
                 string effectiveMotionType = row.MotionType;
                 bool hasZ = Math.Abs(row.EndZ) > 1e-9;
-                if (hasZ && (row.MotionType.Contains("Line") || row.MotionType.Contains("Rapid")))
+                bool isRapid3 = row.MotionType.Contains("Rapid3");
+                if (isRapid3)
                 {
-                    // Thay thế "Line" bằng "Linear3" để BuildPositioningIdentifierWord chọn Da.2=0x0B
+                    // Rapid3 đã có "rapid3" trong tên → BuildPositioningIdentifierWord tự chọn Da.2=0x15
+                    // Không cần thay thế thêm
+                    hasAnyZ = true; // Rapid3 luôn ghi vào Axis 3 buffer
+                }
+                else if (hasZ && (row.MotionType.Contains("Line") || row.MotionType.Contains("Rapid")))
+                {
                     effectiveMotionType = row.MotionType.Replace("Line", "Linear3");
                     hasAnyZ = true;
                 }
@@ -639,9 +645,10 @@ namespace DACDT_2026
                 }
 
                 // 7. Axis 3 (Z) — Da.1+Da.2 + Da.6 position
-                if (hasZ)
+                // Rapid3 luôn ghi Z (kể cả Z=0). Line có Z ≠ 0 mới ghi.
+                if (isRapid3 || hasZ)
                 {
-                    // Da.1+Da.2 phải khớp với master: Linear3 (Da.2=0x0B)
+                    // Da.1+Da.2 phải khớp với master
                     short zMoveCode = BuildPositioningIdentifierWord(effectiveMotionType);
                     zBulkData[blockOffset + OffsetMoveCode] = zMoveCode;
 
@@ -783,10 +790,11 @@ namespace DACDT_2026
                 var row = rows[i];
 
                 // Da.1 + Da.2: phải khớp với master axis
-                // Nếu dòng có Z → dùng Linear3 (Da.2=0x0B), ngược lại dùng MotionType gốc
+                // Rapid3 → Linear3 (Da.2=0x15). Line có Z → Linear3. Còn lại → MotionType gốc.
                 bool hasZ = Math.Abs(row.EndZ) > 1e-9;
+                bool isRapid3 = row.MotionType.Contains("Rapid3");
                 string effectiveMotionType = row.MotionType;
-                if (hasZ && (row.MotionType.Contains("Line") || row.MotionType.Contains("Rapid")))
+                if (!isRapid3 && hasZ && (row.MotionType.Contains("Line") || row.MotionType.Contains("Rapid")))
                     effectiveMotionType = row.MotionType.Replace("Line", "Linear3");
 
                 short moveCode = BuildPositioningIdentifierWord(effectiveMotionType);

@@ -569,6 +569,9 @@ namespace DACDT_2026
             var result = new List<ProcessRow>();
             if (activeCadDocument?.Primitives == null) return result;
 
+            // Snapshot rapidSpeed để dùng trong background thread
+            string snapRapidSpeed = rapidSpeed;
+
             var paths = GetConnectedPathsFromCad(activeCadDocument.Primitives);
             bool isGcodeDocument = string.Equals(activeDocumentKind, "GCODE", StringComparison.OrdinalIgnoreCase);
 
@@ -610,9 +613,15 @@ namespace DACDT_2026
                         bool onlyPath = (paths.Count == 1);
                         double startZ = isGcodeDocument ? startPt.Z : 0.0;
 
-                        string startMotion = (isFirstPath && onlyPath)
-                            ? "Line (Continuous Path)"
-                            : "Line (Continuous Positioning)";
+                        // G0 Rapid luôn dùng "Rapid3" → Linear3 (Da.2=0x15), tốc độ rapidSpeed
+                        bool startIsRapid = isGcodeDocument &&
+                            (prim.SourceType.Contains("G0") || prim.SourceType.Contains("Rapid"));
+
+                        string startMotion = startIsRapid
+                            ? "Rapid3 (Continuous Positioning)"
+                            : ((isFirstPath && onlyPath)
+                                ? "Line (Continuous Path)"
+                                : "Line (Continuous Positioning)");
 
                         var startRow = new ProcessRow
                         {
@@ -624,27 +633,38 @@ namespace DACDT_2026
                             EndZ             = startZ
                         };
                         ApplyPrimitiveExtraData(startRow, prim, isGcodeDocument);
+                        if (startIsRapid && !string.IsNullOrEmpty(snapRapidSpeed))
+                            startRow.Speed = snapRapidSpeed;
                         result.Add(startRow);
                     }
 
                     if (prim.SourceType.Contains("Line") || prim.SourceType.Contains("Polyline"))
                     {
+                        bool primIsRapid = isGcodeDocument &&
+                            (prim.SourceType.Contains("G0") || prim.SourceType.Contains("Rapid"));
+
                         for (int i = 1; i < prim.Points.Count; i++)
                         {
-                            bool   isLastInPrim   = (i == prim.Points.Count - 1);
-                            string currentSuffix  = (isLastInPrim && isLastInPath) ? suffix : " (Continuous Path)";
-                            var    pt             = prim.Points[i];
-                            double endZ           = isGcodeDocument ? pt.Z : 0.0;
+                            bool   isLastInPrim  = (i == prim.Points.Count - 1);
+                            string currentSuffix = (isLastInPrim && isLastInPath) ? suffix : " (Continuous Path)";
+                            var    pt            = prim.Points[i];
+                            double endZ          = isGcodeDocument ? pt.Z : 0.0;
+
+                            // G0 Rapid: prefix "Rapid3" → Linear3 (Da.2=0x15)
+                            string motionPrefix = primIsRapid ? "Rapid3" : "Line";
 
                             var row = new ProcessRow
                             {
-                                MotionType       = "Line" + currentSuffix,
+                                MotionType       = motionPrefix + currentSuffix,
                                 EndCoordinate    = string.Format(CultureInfo.InvariantCulture,
                                     "{0:0.###};{1:0.###}", pt.X, pt.Y),
                                 CenterCoordinate = string.Empty,
                                 EndZ             = endZ
                             };
                             ApplyPrimitiveExtraData(row, prim, isGcodeDocument);
+                            // G0: luôn dùng rapidSpeed, bỏ qua F từ file
+                            if (primIsRapid && !string.IsNullOrEmpty(snapRapidSpeed))
+                                row.Speed = snapRapidSpeed;
                             if (!isGcodeDocument && pathClosed && isLastInPath && isLastInPrim)
                                 row.MCodeValue = "2";
                             result.Add(row);
@@ -841,7 +861,7 @@ namespace DACDT_2026
         {
             const double LimitX = 170.0;   // Trục 1 – X
             const double LimitY = 170.0;   // Trục 2 – Y
-            const double LimitZ = 50.0;    // Trục 3 – Z (thông tin, chưa lấy từ file)
+            // LimitZ = 50.0 mm — chưa dùng trong scan hiện tại
 
             if (activeCadDocument == null)
             {

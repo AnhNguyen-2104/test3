@@ -521,3 +521,9 @@ html.theme-light .data-table th { background: rgba(239, 244, 255, 0.98); }
 @media (max-width: 900px) {
   .axis-grid { grid-template-columns: 1fr; }
 }
+
+/* ── Integrity badge ─────────────────────────────────────────────────────── */
+#integrity-badge { transition: background 0.3s, color 0.3s; }
+#integrity-badge.tone-idle    { background: rgba(142,160,195,0.12); color: #8ea0c3; }
+#integrity-badge.tone-ready   { background: rgba(34,197,94,0.15);   color: #22c55e; }
+#integrity-badge.tone-fault   { background: rgba(239,68,68,0.18);   color: #ef4444; }

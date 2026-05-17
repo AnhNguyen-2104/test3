@@ -89,6 +89,7 @@ namespace DACDT_2026
         private string globalZDown = "";
         private string globalZSafe = "";
         private string globalSpeed = "1000";
+        private string rapidSpeed  = "10000"; // Tốc độ G00 — cài đặt từ Settings tab
         private double offsetX = 0.0;
         private double offsetY = 0.0;
         private string rawGcodeText = string.Empty;

@@ -25,7 +25,7 @@
           <button class="nav-link is-active" data-view="control">DASHBOARD</button>
           <button class="nav-link" data-view="logs">LOGS</button>
           <button class="nav-link" data-view="telemetry">TELEMETRY</button>
-          <button class="nav-link" data-placeholder="SYSTEM SETTINGS">SYSTEM SETTINGS</button>
+          <button class="nav-link" data-view="settings">SYSTEM SETTINGS</button>
           <button class="nav-link" data-view="dxf">DXF/GCODE RUN</button>
         </nav>
       </div>
@@ -49,7 +49,7 @@
         <button class="side-link is-active" data-view="control">CONTROL</button>
         <button class="side-link" data-view="telemetry">TELEMETRY</button>
         <button class="side-link" data-view="logs">LOGS</button>
-        <button class="side-link" data-placeholder="SETTINGS">SETTINGS</button>
+        <button class="side-link" data-view="settings">SETTINGS</button>
         <button class="side-link" data-view="dxf">DXF/GCODE RUN</button>
       </nav>
 
@@ -327,6 +327,76 @@
               <span>M code = 2 (Dispense OFF)</span>
             </div>
 
+          </div>
+        </div>
+      </section>
+
+      <!-- ========== SYSTEM SETTINGS ========== -->
+      <section id="view-settings" class="view">
+        <div class="panel" style="max-width:680px;">
+          <div class="panel-header">
+            <div>
+              <div class="panel-title">System Settings</div>
+              <div class="panel-subtitle">Cấu hình kết nối PLC và tham số chạy G-code</div>
+            </div>
+          </div>
+
+          <!-- PLC Connection -->
+          <div style="margin-top:20px;">
+            <div style="font-size:13px;font-weight:600;color:var(--text-main);margin-bottom:8px;">PLC Connection</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+              <div>
+                <div style="font-size:11px;color:var(--muted);margin-bottom:4px;">IP Address</div>
+                <input id="plc-ip-input" class="text-input" type="text" value="192.168.3.39" placeholder="192.168.3.39">
+              </div>
+              <div>
+                <div style="font-size:11px;color:var(--muted);margin-bottom:4px;">Port</div>
+                <input id="plc-port-input" class="text-input" type="number" value="3000" min="1" max="65535">
+              </div>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;margin-top:8px;">
+              <button id="set-plc-conn-btn" class="primary-button" style="background:var(--cyan);color:#fff;">Apply Connection</button>
+              <span id="plc-conn-status" style="font-size:11px;color:var(--muted);"></span>
+            </div>
+          </div>
+
+          <!-- G00 Rapid Speed -->
+          <div style="margin-top:24px;padding-top:16px;border-top:1px solid var(--border);">
+            <div style="font-size:13px;font-weight:600;color:var(--text-main);margin-bottom:4px;">G00 Rapid Speed (mm/min)</div>
+            <div style="font-size:11px;color:var(--muted);margin-bottom:10px;">
+              Tốc độ áp dụng cho tất cả lệnh G00. Bỏ qua giá trị F trong file G-code. Mặc định: 10000.
+            </div>
+            <div style="display:flex;gap:8px;align-items:center;">
+              <input id="g0-speed-input" class="text-input" type="number" value="10000" min="1" step="1" style="width:160px;">
+              <button id="set-g0-speed-btn" class="primary-button" style="background:var(--cyan);color:#fff;">Apply</button>
+              <span id="g0-speed-status" style="font-size:11px;color:var(--muted);"></span>
+            </div>
+          </div>
+
+          <!-- Z Offsets -->
+          <div style="margin-top:24px;padding-top:16px;border-top:1px solid var(--border);">
+            <div style="font-size:13px;font-weight:600;color:var(--text-main);margin-bottom:4px;">Z Axis Offsets (mm)</div>
+            <div style="font-size:11px;color:var(--muted);margin-bottom:10px;">
+              Z Down: độ cao hạ đầu phun. Z Safe: độ cao di chuyển an toàn.
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+              <div>
+                <div style="font-size:11px;color:var(--muted);margin-bottom:4px;">Z Down (mm)</div>
+                <input id="z-down-input" class="text-input" type="number" value="0" step="0.001">
+              </div>
+              <div>
+                <div style="font-size:11px;color:var(--muted);margin-bottom:4px;">Z Safe (mm)</div>
+                <input id="z-safe-input" class="text-input" type="number" value="5" step="0.001">
+              </div>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;margin-top:8px;">
+              <button id="set-z-offsets-btn" class="primary-button" style="background:var(--cyan);color:#fff;">Apply Z Offsets</button>
+              <span id="z-offsets-status" style="font-size:11px;color:var(--muted);"></span>
+            </div>
+          </div>
+
+          <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border);font-size:11px;color:var(--muted);">
+            Các cài đặt được lưu trong bộ nhớ — mất khi đóng app.
           </div>
         </div>
       </section>
