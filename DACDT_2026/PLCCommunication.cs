@@ -7,7 +7,7 @@ namespace DACDT_2026
 {
     public class PLCCommunication : IDisposable
     {
-        private dynamic plcDevice;
+        private ActUtlTypeLib.ActUtlType plcDevice;
         private bool isConnected = false;
         private readonly object commLock = new object();
 
@@ -23,9 +23,7 @@ namespace DACDT_2026
             LogicalStationNumber = logicalStationNumber;
             try
             {
-                Type actUtlType = Type.GetTypeFromProgID("ActUtlType.ActUtlType");
-                if (actUtlType == null) throw new Exception("MX Component chưa được cài đặt.");
-                plcDevice = Activator.CreateInstance(actUtlType);
+                plcDevice = new ActUtlTypeLib.ActUtlType();
             }
             catch (Exception ex)
             {
@@ -75,9 +73,9 @@ namespace DACDT_2026
         public object ReadDevice(string deviceName, int count = 1)
         {
             if (!isConnected) throw new InvalidOperationException("Chưa kết nối PLC");
-            object readValue = null;
-            int result = plcDevice.ReadDevice(deviceName, count, ref readValue);
-            if (result == 0) return readValue;
+            short[] arr = new short[count];
+            int result = plcDevice.ReadDeviceBlock2(deviceName, count, out arr[0]);
+            if (result == 0) return arr;
             throw new Exception($"Lỗi ReadDevice: {result}");
         }
 
@@ -162,20 +160,16 @@ namespace DACDT_2026
                 }
             }
 
-            // try ReadDevice (multi-word read) if available
+            // try ReadDeviceBlock2 (multi-word read) if available
             try
             {
-                object readValue = null;
-                int result = plcDevice.ReadDevice(deviceName, count, ref readValue);
+                short[] arr = new short[count];
+                int result = plcDevice.ReadDeviceBlock2(deviceName, count, out arr[0]);
                 if (result == 0)
                 {
-                    if (readValue is Array arr)
-                    {
-                        int[] outArr = new int[arr.Length];
-                        for (int i = 0; i < arr.Length; i++) outArr[i] = Convert.ToInt32(arr.GetValue(i), CultureInfo.InvariantCulture);
-                        return outArr;
-                    }
-                    return new int[] { Convert.ToInt32(readValue, CultureInfo.InvariantCulture) };
+                    int[] outArr = new int[count];
+                    for (int i = 0; i < count; i++) outArr[i] = arr[i];
+                    return outArr;
                 }
             }
             catch
@@ -529,8 +523,7 @@ namespace DACDT_2026
 
         public string GetErrorMessage(int errorCode)
         {
-            try { return plcDevice.GetErrorMessage(errorCode); }
-            catch { return $"Mã lỗi: {errorCode}"; }
+            return $"Mã lỗi: {errorCode}";
         }
 
         public void Dispose()
