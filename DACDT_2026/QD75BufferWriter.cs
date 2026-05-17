@@ -636,9 +636,14 @@ namespace DACDT_2026
                     bulkData[blockOffset + OffsetCenterX + 1] = (short)((centerX >> 16) & 0xFFFF);
                 }
 
-                // 7. Axis 3 (Z) — Da.6 position (offset 6 & 7 trong block Z)
+                // 7. Axis 3 (Z) — Da.1+Da.2 + Da.6 position
                 if (hasZ)
                 {
+                    // Da.1+Da.2 phải khớp với master: Linear3 (Da.2=0x0B)
+                    short zMoveCode = BuildPositioningIdentifierWord(effectiveMotionType);
+                    zBulkData[blockOffset + OffsetMoveCode] = zMoveCode;
+
+                    // Da.6 Positioning address Z (32-bit)
                     int endZScaled = Convert.ToInt32(Math.Round(row.EndZ * CoordinateMultiplier));
                     zBulkData[blockOffset + OffsetPosX]     = (short)(endZScaled & 0xFFFF);
                     zBulkData[blockOffset + OffsetPosX + 1] = (short)((endZScaled >> 16) & 0xFFFF);
@@ -746,9 +751,8 @@ namespace DACDT_2026
 
         /// <summary>
         /// Write slave axis (Y) positioning data using a single bulk WriteBuffer call.
-        /// Significantly faster than individual writes for large point sets.
-        /// Only writes Da.6 (position Y) and Da.7 (arc center Y) — same as WriteSlaveAxisData
-        /// but in one COM call instead of N×4 calls.
+        /// Ghi Da.1 (operation pattern) và Da.2 (control system) đồng bộ với master axis.
+        /// Với dòng có Z: Da.2 = 0x0B (ABS_Linear3). Không có Z: Da.2 = 0x0A (ABS_Linear2).
         /// </summary>
         public static SendResult WriteSlaveAxisDataBulk(PLCCommunication plcComm, List<PositioningDataRow> rows, int slaveBaseG = 8000)
         {
@@ -769,15 +773,26 @@ namespace DACDT_2026
             }
 
             int totalWords = rows.Count * Stride;
-            short[] bulkData = new short[totalWords]; // zero-initialised — Da.1~Da.5, Da.8, Da.9 left as 0
+            short[] bulkData = new short[totalWords];
 
             for (int i = 0; i < rows.Count; i++)
             {
                 int blockOffset = i * Stride;
+                var row = rows[i];
+
+                // Da.1 + Da.2: phải khớp với master axis
+                // Nếu dòng có Z → dùng Linear3 (Da.2=0x0B), ngược lại dùng MotionType gốc
+                bool hasZ = Math.Abs(row.EndZ) > 1e-9;
+                string effectiveMotionType = row.MotionType;
+                if (hasZ && (row.MotionType.Contains("Line") || row.MotionType.Contains("Rapid")))
+                    effectiveMotionType = row.MotionType.Replace("Line", "Linear3");
+
+                short moveCode = BuildPositioningIdentifierWord(effectiveMotionType);
+                bulkData[blockOffset + OffsetMoveCode] = moveCode;
 
                 // Da.6 Positioning address Y (32-bit) — offset 6 & 7
                 int endY = 0;
-                if (TryParseCoordinateY(rows[i].EndCoordinate, out endY))
+                if (TryParseCoordinateY(row.EndCoordinate, out endY))
                 {
                     bulkData[blockOffset + OffsetPosX]     = (short)(endY & 0xFFFF);
                     bulkData[blockOffset + OffsetPosX + 1] = (short)((endY >> 16) & 0xFFFF);
@@ -785,7 +800,7 @@ namespace DACDT_2026
 
                 // Da.7 Arc address Y (32-bit) — offset 8 & 9
                 int centerY = 0;
-                if (TryParseCoordinateY(rows[i].CenterCoordinate, out centerY))
+                if (TryParseCoordinateY(row.CenterCoordinate, out centerY))
                 {
                     bulkData[blockOffset + OffsetCenterX]     = (short)(centerY & 0xFFFF);
                     bulkData[blockOffset + OffsetCenterX + 1] = (short)((centerY >> 16) & 0xFFFF);
@@ -798,7 +813,7 @@ namespace DACDT_2026
                 if (res != 0)
                 {
                     result.Success = false;
-                    result.ErrorMessage = $"WriteBuffer (slave) failed: {res}";
+                    result.ErrorMessage = $"WriteBuffer (slave Y) failed: {res}";
                 }
                 else
                 {
