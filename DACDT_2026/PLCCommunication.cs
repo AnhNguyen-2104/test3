@@ -277,7 +277,21 @@ namespace DACDT_2026
             if (data == null || data.Length == 0) throw new ArgumentException("Khong co du lieu de ghi.", nameof(data));
             try
             {
-                return plcDevice.WriteBuffer(startIO, address, data.Length, ref data[0]);
+                int res = 0;
+                for (int i = 0; i < data.Length; i++)
+                {
+                    string devName = $"U{startIO:X}\\G{address + i}";
+                    try
+                    {
+                        res = plcDevice.SetDevice2(devName, data[i]);
+                    }
+                    catch (Microsoft.CSharp.RuntimeBinder.RuntimeBinderException)
+                    {
+                        res = plcDevice.SetDevice(devName, (int)data[i]);
+                    }
+                    if (res != 0) return res;
+                }
+                return res;
             }
             catch (Exception ex)
             {
@@ -300,18 +314,27 @@ namespace DACDT_2026
                 try
                 {
                     // Bước 1: Đọc giá trị hiện tại
-                    short[] sData = new short[1];
-                    int resRead = plcDevice.ReadBuffer(startIO, address, 1, out sData[0]);
+                    int val;
+                    int resRead = plcDevice.GetDevice($"U{startIO:X}\\G{address}", out val);
                     if (resRead != 0) return resRead;
 
+                    short current = (short)val;
+
                     // Bước 2: Xóa 2 bit b0, b1 về 0 (AND với 0xFFFC ~ -4)
-                    sData[0] = (short)(sData[0] & ~0x0003);
+                    current = (short)(current & ~0x0003);
 
                     // Bước 3: Ghi giá trị mới (00, 01, 11)
-                    sData[0] = (short)(sData[0] | (da1Value & 0x0003));
+                    current = (short)(current | (da1Value & 0x0003));
 
                     // Bước 4: Ghi xuống PLC
-                    return plcDevice.WriteBuffer(startIO, address, 1, ref sData[0]);
+                    try
+                    {
+                        return plcDevice.SetDevice2($"U{startIO:X}\\G{address}", current);
+                    }
+                    catch (Microsoft.CSharp.RuntimeBinder.RuntimeBinderException)
+                    {
+                        return plcDevice.SetDevice($"U{startIO:X}\\G{address}", (int)current);
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -335,15 +358,24 @@ namespace DACDT_2026
                 usedMethod = "ReadBuffer -> Modify (lower5) -> WriteBuffer";
                 try
                 {
-                    short[] sData = new short[1];
-                    int resRead = plcDevice.ReadBuffer(startIO, address, 1, out sData[0]);
+                    int val;
+                    int resRead = plcDevice.GetDevice($"U{startIO:X}\\G{address}", out val);
                     if (resRead != 0) return resRead;
 
-                    // Keep upper bits, replace only Positioning Identifier field (b0..b4).
-                    sData[0] = (short)(sData[0] & ~0x001F);
-                    sData[0] = (short)(sData[0] | (identifierValue & 0x001F));
+                    short current = (short)val;
 
-                    return plcDevice.WriteBuffer(startIO, address, 1, ref sData[0]);
+                    // Keep upper bits, replace only Positioning Identifier field (b0..b4).
+                    current = (short)(current & ~0x001F);
+                    current = (short)(current | (identifierValue & 0x001F));
+
+                    try
+                    {
+                        return plcDevice.SetDevice2($"U{startIO:X}\\G{address}", current);
+                    }
+                    catch (Microsoft.CSharp.RuntimeBinder.RuntimeBinderException)
+                    {
+                        return plcDevice.SetDevice($"U{startIO:X}\\G{address}", (int)current);
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -391,7 +423,15 @@ namespace DACDT_2026
             }
 
             usedMethod = "SetDevice2 (16-bit)";
-            return plcDevice.SetDevice2(devicePath, value);
+            try
+            {
+                return plcDevice.SetDevice2(devicePath, value);
+            }
+            catch (Microsoft.CSharp.RuntimeBinder.RuntimeBinderException)
+            {
+                usedMethod = "SetDevice (16-bit fallback)";
+                return plcDevice.SetDevice(devicePath, (int)value);
+            }
         }
 
         public int WriteInt32ToDevicePath(string devicePath, int value, out string usedMethod)
@@ -446,10 +486,25 @@ namespace DACDT_2026
             short lowWord = (short)(value & 0xFFFF);
             short highWord = (short)((value >> 16) & 0xFFFF);
 
-            int result = plcDevice.SetDevice2(lowWordDevice, lowWord);
+            int result;
+            try
+            {
+                result = plcDevice.SetDevice2(lowWordDevice, lowWord);
+            }
+            catch (Microsoft.CSharp.RuntimeBinder.RuntimeBinderException)
+            {
+                result = plcDevice.SetDevice(lowWordDevice, (int)lowWord);
+            }
             if (result != 0) return result;
 
-            return plcDevice.SetDevice2(highWordDevice, highWord);
+            try
+            {
+                return plcDevice.SetDevice2(highWordDevice, highWord);
+            }
+            catch (Microsoft.CSharp.RuntimeBinder.RuntimeBinderException)
+            {
+                return plcDevice.SetDevice(highWordDevice, (int)highWord);
+            }
         }
 
 
