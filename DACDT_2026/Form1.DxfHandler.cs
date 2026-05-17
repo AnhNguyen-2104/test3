@@ -429,20 +429,22 @@ namespace DACDT_2026
             }
 
             // ── Tạm dừng poll timer để tránh ContextSwitchDeadlock ──────────────────
-            // Poll timer chạy Task.Run với COM calls từ background thread.
-            // Nếu UI thread đang bận ghi batch data, COM không thể marshal
-            // từ background thread về STA thread → deadlock sau 60 giây.
             plcPollTimer.Stop();
 
             try
             {
-                // ── BƯỚC 1: Master axis (Axis 1 / X): nạp dữ liệu vào bộ đệm (G2000+) ────
-                // Tắt writeStartNo để máy KHÔNG chạy ngay lập tức.
                 _ = SendProgressAsync(true, 0);
-                var sendResult = QD75BufferWriter.WritePositioningData(plcComm, 0, dataRows, writeStartNo: false, progressCallback: percent =>
+
+                // Run heavy COM writes on background thread to keep UI responsive and avoid DoEvents / WOW64 crash
+                var sendResult = await Task.Run(() =>
                 {
-                    _ = SendProgressAsync(true, percent / 2);
-                    Application.DoEvents();
+                    return QD75BufferWriter.WritePositioningData(plcComm, 0, dataRows, writeStartNo: false, progressCallback: percent =>
+                    {
+                        if (!isClosing)
+                        {
+                            this.BeginInvoke((Action)(() => { _ = SendProgressAsync(true, percent / 2); }));
+                        }
+                    });
                 });
 
                 foreach (var wr in sendResult.WriteResults)
@@ -459,10 +461,15 @@ namespace DACDT_2026
                 }
 
                 // ── BƯỚC 2: Slave axis (Axis 2 / Y): nạp toạ độ vào bộ đệm (G8006+) ──────
-                var slaveResult = QD75BufferWriter.WriteSlaveAxisData(plcComm, dataRows, slaveBaseG: 8000, progressCallback: percent =>
+                var slaveResult = await Task.Run(() =>
                 {
-                    _ = SendProgressAsync(true, 50 + percent / 2);
-                    Application.DoEvents();
+                    return QD75BufferWriter.WriteSlaveAxisData(plcComm, dataRows, slaveBaseG: 8000, progressCallback: percent =>
+                    {
+                        if (!isClosing)
+                        {
+                            this.BeginInvoke((Action)(() => { _ = SendProgressAsync(true, 50 + percent / 2); }));
+                        }
+                    });
                 });
 
                 foreach (var wr in slaveResult.WriteResults)
@@ -478,14 +485,11 @@ namespace DACDT_2026
                     return;
                 }
 
-                // Không tự động ghi Start No. vào G1500 nữa.
-                // Người dùng sẽ nhấn nút "START ACTION (M2000)" trên giao diện để kích hoạt chạy máy.
                 await NotifyAsync("success", "PLC", $"CAD data loaded: {dataRows.Count} points → Axis 1 (G2000+) & Axis 2 (G8006+). Press START ACTION to run.");
             }
             finally
             {
                 _ = SendProgressAsync(false, 0);
-                // ── Bật lại poll timer sau khi ghi xong (hoặc lỗi) ──────────────────
                 if (plcComm != null && plcComm.IsConnected && !isClosing)
                     plcPollTimer.Start();
             }
