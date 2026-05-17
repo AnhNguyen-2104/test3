@@ -676,6 +676,82 @@ namespace DACDT_2026
         }
 
         /// <summary>
+        /// Write slave axis (Y) positioning data using a single bulk WriteBuffer call.
+        /// Significantly faster than individual writes for large point sets.
+        /// Only writes Da.6 (position Y) and Da.7 (arc center Y) — same as WriteSlaveAxisData
+        /// but in one COM call instead of N×4 calls.
+        /// </summary>
+        public static SendResult WriteSlaveAxisDataBulk(PLCCommunication plcComm, List<PositioningDataRow> rows, int slaveBaseG = 8000)
+        {
+            var result = new SendResult { Success = true };
+
+            if (plcComm == null || !plcComm.IsConnected)
+            {
+                result.Success = false;
+                result.ErrorMessage = "PLC is not connected.";
+                return result;
+            }
+
+            if (rows == null || rows.Count == 0)
+            {
+                result.Success = false;
+                result.ErrorMessage = "No points to send.";
+                return result;
+            }
+
+            int totalWords = rows.Count * Stride;
+            short[] bulkData = new short[totalWords]; // zero-initialised — Da.1~Da.5, Da.8, Da.9 left as 0
+
+            for (int i = 0; i < rows.Count; i++)
+            {
+                int blockOffset = i * Stride;
+
+                // Da.6 Positioning address Y (32-bit) — offset 6 & 7
+                int endY = 0;
+                if (TryParseCoordinateY(rows[i].EndCoordinate, out endY))
+                {
+                    bulkData[blockOffset + OffsetPosX]     = (short)(endY & 0xFFFF);
+                    bulkData[blockOffset + OffsetPosX + 1] = (short)((endY >> 16) & 0xFFFF);
+                }
+
+                // Da.7 Arc address Y (32-bit) — offset 8 & 9
+                int centerY = 0;
+                if (TryParseCoordinateY(rows[i].CenterCoordinate, out centerY))
+                {
+                    bulkData[blockOffset + OffsetCenterX]     = (short)(centerY & 0xFFFF);
+                    bulkData[blockOffset + OffsetCenterX + 1] = (short)((centerY >> 16) & 0xFFFF);
+                }
+            }
+
+            try
+            {
+                int res = plcComm.WriteBuffer(0, slaveBaseG, bulkData);
+                if (res != 0)
+                {
+                    result.Success = false;
+                    result.ErrorMessage = $"WriteBuffer (slave) failed: {res}";
+                }
+                else
+                {
+                    result.WriteResults.Add(new WriteResult
+                    {
+                        Address = $"U0\\G{slaveBaseG} to U0\\G{slaveBaseG + totalWords - 1}",
+                        Value   = $"Bulk write {rows.Count} slave points",
+                        Status  = "OK",
+                        Message = "Bulk WriteBuffer (slave Y) successful"
+                    });
+                }
+            }
+            catch (Exception ex)
+            {
+                result.Success = false;
+                result.ErrorMessage = ex.Message;
+            }
+
+            return result;
+        }
+
+        /// <summary>
         /// Manual start axis
         /// </summary>
         public static WriteResult StartAxis(PLCCommunication plcComm, int axisIndex, int startNo)

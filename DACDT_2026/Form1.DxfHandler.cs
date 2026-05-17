@@ -455,16 +455,10 @@ namespace DACDT_2026
             {
                 _ = SendProgressAsync(true, 0);
 
-                // Run heavy COM writes on background thread to keep UI responsive and avoid DoEvents / WOW64 crash
+                // ── BƯỚC 1: Master axis (Axis 1 / X): bulk write toàn bộ buffer G2000+ ──
                 var sendResult = await Task.Run(() =>
                 {
-                    return QD75BufferWriter.WritePositioningData(plcComm, 0, dataRows, writeStartNo: false, progressCallback: percent =>
-                    {
-                        if (!isClosing)
-                        {
-                            this.BeginInvoke((Action)(() => { _ = SendProgressAsync(true, percent / 2); }));
-                        }
-                    });
+                    return QD75BufferWriter.WritePositioningDataBulk(plcComm, 0, dataRows, writeStartNo: false);
                 });
 
                 foreach (var wr in sendResult.WriteResults)
@@ -474,22 +468,18 @@ namespace DACDT_2026
                         await NotifyAsync("error", "Telemetry [Axis1]", $"{wr.Address}: {wr.Message}");
                 }
 
+                _ = SendProgressAsync(true, 50);
+
                 if (!sendResult.Success)
                 {
                     await NotifyAsync("error", "Telemetry [Axis1]", "Failed to load Axis 1 buffer.");
                     return;
                 }
 
-                // ── BƯỚC 2: Slave axis (Axis 2 / Y): nạp toạ độ vào bộ đệm (G8006+) ──────
+                // ── BƯỚC 2: Slave axis (Axis 2 / Y): bulk write G8000+ ──────────────────
                 var slaveResult = await Task.Run(() =>
                 {
-                    return QD75BufferWriter.WriteSlaveAxisData(plcComm, dataRows, slaveBaseG: 8000, progressCallback: percent =>
-                    {
-                        if (!isClosing)
-                        {
-                            this.BeginInvoke((Action)(() => { _ = SendProgressAsync(true, 50 + percent / 2); }));
-                        }
-                    });
+                    return QD75BufferWriter.WriteSlaveAxisDataBulk(plcComm, dataRows, slaveBaseG: 8000);
                 });
 
                 foreach (var wr in slaveResult.WriteResults)
