@@ -464,7 +464,8 @@ namespace DACDT_2026
                     Dwell            = row.Dwell,
                     Speed            = row.Speed,
                     EndCoordinate    = ApplyOffsetToCoordSend(row.EndCoordinate,    offsetX, offsetY),
-                    CenterCoordinate = ApplyOffsetToCoordSend(row.CenterCoordinate, offsetX, offsetY)
+                    CenterCoordinate = ApplyOffsetToCoordSend(row.CenterCoordinate, offsetX, offsetY),
+                    EndZ             = row.EndZ
                 });
             }
 
@@ -521,8 +522,12 @@ namespace DACDT_2026
                     return;
                 }
 
+                bool hasZAxis = dataRows.Exists(r => Math.Abs(r.EndZ) > 1e-9);
+                string axisInfo = hasZAxis
+                    ? "Axis 1 (G2000+) & Axis 2 (G8000+) & Axis 3/Z (G14000+)"
+                    : "Axis 1 (G2000+) & Axis 2 (G8000+)";
                 await NotifyAsync("success", "PLC",
-                    $"Đã nạp {sendResult.RowCount} dòng lệnh → Axis 1 (G2000+) & Axis 2 (G8000+). Nhấn START ACTION để chạy.");
+                    $"Đã nạp {sendResult.RowCount} dòng lệnh → {axisInfo}. Nhấn START ACTION để chạy.");
             }
             finally
             {
@@ -603,9 +608,8 @@ namespace DACDT_2026
                     {
                         var startPt   = prim.Points.First();
                         bool onlyPath = (paths.Count == 1);
+                        double startZ = isGcodeDocument ? startPt.Z : 0.0;
 
-                        // Điểm nhảy sang start của path mới (đứt quãng) → phải dừng (Continuous Positioning)
-                        // Điểm start của path duy nhất → Continuous Path (chạy thẳng vào path)
                         string startMotion = (isFirstPath && onlyPath)
                             ? "Line (Continuous Path)"
                             : "Line (Continuous Positioning)";
@@ -616,7 +620,8 @@ namespace DACDT_2026
                             EndCoordinate    = string.Format(CultureInfo.InvariantCulture,
                                 "{0:0.###};{1:0.###}", startPt.X, startPt.Y),
                             CenterCoordinate = string.Empty,
-                            MCodeValue       = (!isGcodeDocument && pathClosed) ? "1" : string.Empty
+                            MCodeValue       = (!isGcodeDocument && pathClosed) ? "1" : string.Empty,
+                            EndZ             = startZ
                         };
                         ApplyPrimitiveExtraData(startRow, prim, isGcodeDocument);
                         result.Add(startRow);
@@ -628,13 +633,16 @@ namespace DACDT_2026
                         {
                             bool   isLastInPrim   = (i == prim.Points.Count - 1);
                             string currentSuffix  = (isLastInPrim && isLastInPath) ? suffix : " (Continuous Path)";
+                            var    pt             = prim.Points[i];
+                            double endZ           = isGcodeDocument ? pt.Z : 0.0;
 
                             var row = new ProcessRow
                             {
                                 MotionType       = "Line" + currentSuffix,
                                 EndCoordinate    = string.Format(CultureInfo.InvariantCulture,
-                                    "{0:0.###};{1:0.###}", prim.Points[i].X, prim.Points[i].Y),
-                                CenterCoordinate = string.Empty
+                                    "{0:0.###};{1:0.###}", pt.X, pt.Y),
+                                CenterCoordinate = string.Empty,
+                                EndZ             = endZ
                             };
                             ApplyPrimitiveExtraData(row, prim, isGcodeDocument);
                             if (!isGcodeDocument && pathClosed && isLastInPath && isLastInPrim)

@@ -61,12 +61,13 @@ namespace DACDT_2026
         /// </summary>
         public class PositioningDataRow
         {
-            public string MotionType { get; set; }
-            public string MCodeValue { get; set; }
-            public string Dwell { get; set; }
-            public string Speed { get; set; }
-            public string EndCoordinate { get; set; }
+            public string MotionType       { get; set; }
+            public string MCodeValue       { get; set; }
+            public string Dwell            { get; set; }
+            public string Speed            { get; set; }
+            public string EndCoordinate    { get; set; }
             public string CenterCoordinate { get; set; }
+            public double EndZ             { get; set; } // Z tọa độ đích (0 = không có Z / 2-axis)
         }
 
         /// <summary>
@@ -119,8 +120,10 @@ namespace DACDT_2026
             else if (s.Contains("arc ccw") || s.Contains("arc circular left"))  da2 = 0x10; // ABS_CircularLeft
             else if (s.Contains("circle"))
                 da2 = s.Contains("ccw") ? 0x10 : 0x0F;                                      // circle default CW
+            else if (s.Contains("linear3") || s.Contains("3-axis"))
+                da2 = 0x0B;                                                                  // ABS_Linear3 (3-axis interpolation)
             else
-                da2 = 0x0A;                                                                  // ABS_Linear2
+                da2 = 0x0A;                                                                  // ABS_Linear2 (2-axis interpolation)
 
             // ── Da.5 Partner axis (b3–b2), Da.3 Acc (b5–b4), Da.4 Dec (b7–b6) ──
             int da5 = partnerAxis & 0x03;
@@ -558,6 +561,7 @@ namespace DACDT_2026
         /// <summary>
         /// Send all positioning data rows to PLC using a single bulk WriteBuffer call.
         /// This is significantly faster than individual writes for large point sets.
+        /// Rows with EndZ != 0 use Da.2=0x0B (ABS_Linear3) and also write Z to Axis 3 buffer (G14000+).
         /// </summary>
         public static SendResult WritePositioningDataBulk(PLCCommunication plcComm, int axisIndex, List<PositioningDataRow> rows, bool writeStartNo = true)
         {
@@ -581,13 +585,26 @@ namespace DACDT_2026
             int totalWords = rows.Count * Stride;
             short[] bulkData = new short[totalWords];
 
+            // Axis 3 (Z) buffer — chỉ ghi nếu có ít nhất 1 dòng có Z
+            bool hasAnyZ = false;
+            short[] zBulkData = new short[totalWords]; // zero-init = không có Z
+
             for (int i = 0; i < rows.Count; i++)
             {
                 var row = rows[i];
                 int blockOffset = i * Stride;
 
                 // 1. Positioning Identifier (16-bit)
-                short moveCode = BuildPositioningIdentifierWord(row.MotionType);
+                // Nếu có Z → dùng Linear3 (Da.2=0x0B), ngược lại dùng MotionType gốc
+                string effectiveMotionType = row.MotionType;
+                bool hasZ = Math.Abs(row.EndZ) > 1e-9;
+                if (hasZ && (row.MotionType.Contains("Line") || row.MotionType.Contains("Rapid")))
+                {
+                    // Thay thế "Line" bằng "Linear3" để BuildPositioningIdentifierWord chọn Da.2=0x0B
+                    effectiveMotionType = row.MotionType.Replace("Line", "Linear3");
+                    hasAnyZ = true;
+                }
+                short moveCode = BuildPositioningIdentifierWord(effectiveMotionType);
                 bulkData[blockOffset + OffsetMoveCode] = moveCode;
 
                 // 2. M Code (16-bit)
@@ -600,14 +617,14 @@ namespace DACDT_2026
 
                 // 4. Command Speed (32-bit -> 2 words)
                 int speedVal = ParseInt(row.Speed) * SpeedMultiplier;
-                bulkData[blockOffset + OffsetSpeed] = (short)(speedVal & 0xFFFF);
+                bulkData[blockOffset + OffsetSpeed]     = (short)(speedVal & 0xFFFF);
                 bulkData[blockOffset + OffsetSpeed + 1] = (short)((speedVal >> 16) & 0xFFFF);
 
                 // 5. Position X (32-bit -> 2 words)
                 int endX = 0;
                 if (TryParseCoordinateX(row.EndCoordinate, out endX))
                 {
-                    bulkData[blockOffset + OffsetPosX] = (short)(endX & 0xFFFF);
+                    bulkData[blockOffset + OffsetPosX]     = (short)(endX & 0xFFFF);
                     bulkData[blockOffset + OffsetPosX + 1] = (short)((endX >> 16) & 0xFFFF);
                 }
 
@@ -615,14 +632,21 @@ namespace DACDT_2026
                 int centerX = 0;
                 if (TryParseCoordinateX(row.CenterCoordinate, out centerX))
                 {
-                    bulkData[blockOffset + OffsetCenterX] = (short)(centerX & 0xFFFF);
+                    bulkData[blockOffset + OffsetCenterX]     = (short)(centerX & 0xFFFF);
                     bulkData[blockOffset + OffsetCenterX + 1] = (short)((centerX >> 16) & 0xFFFF);
+                }
+
+                // 7. Axis 3 (Z) — Da.6 position (offset 6 & 7 trong block Z)
+                if (hasZ)
+                {
+                    int endZScaled = Convert.ToInt32(Math.Round(row.EndZ * CoordinateMultiplier));
+                    zBulkData[blockOffset + OffsetPosX]     = (short)(endZScaled & 0xFFFF);
+                    zBulkData[blockOffset + OffsetPosX + 1] = (short)((endZScaled >> 16) & 0xFFFF);
                 }
             }
 
             try
             {
-                // Write entire block: U0\G(baseG) to U0\G(baseG + totalWords - 1)
                 int res = plcComm.WriteBuffer(0, baseG, bulkData);
                 if (res != 0)
                 {
@@ -634,9 +658,9 @@ namespace DACDT_2026
                     result.WriteResults.Add(new WriteResult
                     {
                         Address = $"U0\\G{baseG} to U0\\G{baseG + totalWords - 1}",
-                        Value = $"Bulk write {rows.Count} points",
-                        Status = "OK",
-                        Message = "Bulk WriteBuffer successful"
+                        Value   = $"Bulk write {rows.Count} points",
+                        Status  = "OK",
+                        Message = "Bulk WriteBuffer (Axis X) successful"
                     });
                 }
             }
@@ -644,6 +668,47 @@ namespace DACDT_2026
             {
                 result.Success = false;
                 result.ErrorMessage = ex.Message;
+            }
+
+            // Ghi Axis 3 (Z) nếu có dòng nào có Z
+            if (result.Success && hasAnyZ)
+            {
+                int zBaseG = ProgramBaseG[2]; // Axis 3 = G14000
+                try
+                {
+                    int res = plcComm.WriteBuffer(0, zBaseG, zBulkData);
+                    if (res != 0)
+                    {
+                        result.WriteResults.Add(new WriteResult
+                        {
+                            Address = $"U0\\G{zBaseG}",
+                            Value   = "Z axis data",
+                            Status  = $"Error({res})",
+                            Message = "WriteBuffer Axis 3 (Z) failed"
+                        });
+                        // Không fail toàn bộ — X/Y đã ghi thành công
+                    }
+                    else
+                    {
+                        result.WriteResults.Add(new WriteResult
+                        {
+                            Address = $"U0\\G{zBaseG} to U0\\G{zBaseG + totalWords - 1}",
+                            Value   = $"Bulk write {rows.Count} Z points",
+                            Status  = "OK",
+                            Message = "Bulk WriteBuffer (Axis Z) successful"
+                        });
+                    }
+                }
+                catch (Exception ex)
+                {
+                    result.WriteResults.Add(new WriteResult
+                    {
+                        Address = $"U0\\G{zBaseG}",
+                        Value   = "Z axis data",
+                        Status  = "Error",
+                        Message = ex.Message
+                    });
+                }
             }
 
             // Write Start No. = 1 to Control base register

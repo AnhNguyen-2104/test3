@@ -24,6 +24,7 @@ namespace DACDT_2026
             public string Speed            { get; set; }
             public string EndCoordinate    { get; set; }
             public string CenterCoordinate { get; set; }
+            public double EndZ             { get; set; } // Z tọa độ đích (0 = không có Z)
         }
 
         private sealed class TelemetryBuffer
