@@ -247,7 +247,10 @@
             <span id="dxf-progress-text" style="font-size: 11px; color: var(--muted); min-width: 30px;">0%</span>
           </div>
           <!-- Send to PLC -->
-          <button id="send-cad-x-button" class="primary-button compact" style="background:linear-gradient(135deg, #10b981, #059669); font-size: 13px; padding: 0 16px;">Send CAD to PLC</button>
+          <div style="display:flex;align-items:center;gap:6px;">
+            <button id="send-cad-x-button" class="primary-button compact" style="background:linear-gradient(135deg, #10b981, #059669); font-size: 13px; padding: 0 16px;">Send CAD to PLC</button>
+            <span id="send-row-count" style="font-size:11px;color:var(--muted);white-space:nowrap;display:none;"></span>
+          </div>
         </div>
 
         <div class="dxf-grid">

@@ -79,6 +79,7 @@ function cacheDom() {
   dom.offsetXInput = document.getElementById("offset-x-input");
   dom.offsetYInput = document.getElementById("offset-y-input");
   dom.applyOffsetBtn = document.getElementById("apply-offset-btn");
+  dom.sendRowCount = document.getElementById("send-row-count");
 }
 
 function bindEvents() {
@@ -407,8 +408,16 @@ function renderDxf() {
   const sendBtn = document.getElementById("send-cad-x-button");
   if (sendBtn) {
     sendBtn.disabled = !(state.control && state.control.connection && state.control.connection.connected);
-    // Remove old listeners to avoid duplicates, although here we can just assign an onclick
     sendBtn.onclick = () => post("sendCadX");
+  }
+  if (dom.sendRowCount) {
+    const count = (state.dxf.processRows || []).length;
+    if (count > 0) {
+      dom.sendRowCount.textContent = count + " dòng";
+      dom.sendRowCount.style.display = "inline";
+    } else {
+      dom.sendRowCount.style.display = "none";
+    }
   }
   
   const isGcode = (state.dxf.fileKind || "").toUpperCase() === "GCODE";
