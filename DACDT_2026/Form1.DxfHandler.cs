@@ -456,10 +456,12 @@ namespace DACDT_2026
                 _ = SendProgressAsync(true, 0);
 
                 // ── BƯỚC 1: Master axis (Axis 1 / X): bulk write toàn bộ buffer G2000+ ──
-                var sendResult = await Task.Run(() =>
-                {
-                    return QD75BufferWriter.WritePositioningDataBulk(plcComm, 0, dataRows, writeStartNo: false);
-                });
+                // Chạy animation 0→45% song song với bulk write để progress bar mượt
+                var axisXTask = Task.Run(() =>
+                    QD75BufferWriter.WritePositioningDataBulk(plcComm, 0, dataRows, writeStartNo: false));
+
+                await AnimateProgressAsync(from: 0, to: 45, durationMs: 800, completionTask: axisXTask);
+                var sendResult = await axisXTask;
 
                 foreach (var wr in sendResult.WriteResults)
                 {
@@ -477,10 +479,12 @@ namespace DACDT_2026
                 }
 
                 // ── BƯỚC 2: Slave axis (Axis 2 / Y): bulk write G8000+ ──────────────────
-                var slaveResult = await Task.Run(() =>
-                {
-                    return QD75BufferWriter.WriteSlaveAxisDataBulk(plcComm, dataRows, slaveBaseG: 8000);
-                });
+                // Chạy animation 50→95% song song với bulk write
+                var axisYTask = Task.Run(() =>
+                    QD75BufferWriter.WriteSlaveAxisDataBulk(plcComm, dataRows, slaveBaseG: 8000));
+
+                await AnimateProgressAsync(from: 50, to: 95, durationMs: 600, completionTask: axisYTask);
+                var slaveResult = await axisYTask;
 
                 foreach (var wr in slaveResult.WriteResults)
                 {
@@ -488,6 +492,8 @@ namespace DACDT_2026
                     if (!wr.Status.StartsWith("OK"))
                         await NotifyAsync("error", "Telemetry [Axis2]", $"{wr.Address}: {wr.Message}");
                 }
+
+                _ = SendProgressAsync(true, 100);
 
                 if (!slaveResult.Success)
                 {
@@ -502,6 +508,32 @@ namespace DACDT_2026
                 _ = SendProgressAsync(false, 0);
                 if (plcComm != null && plcComm.IsConnected && !isClosing)
                     plcPollTimer.Start();
+            }
+        }
+
+        /// <summary>
+        /// Animate progress bar từ <paramref name="from"/> đến <paramref name="to"/> trong
+        /// <paramref name="durationMs"/> ms, nhưng dừng sớm nếu <paramref name="completionTask"/>
+        /// hoàn thành trước. Đảm bảo không vượt quá <paramref name="to"/> khi task xong.
+        /// </summary>
+        private async Task AnimateProgressAsync(int from, int to, int durationMs, Task completionTask)
+        {
+            const int stepMs = 30; // ~33 fps
+            int steps   = Math.Max(1, durationMs / stepMs);
+            int range   = to - from;
+
+            for (int i = 1; i <= steps; i++)
+            {
+                if (isClosing) return;
+                if (completionTask.IsCompleted) break;
+
+                // Easing: ease-out cubic — nhanh lúc đầu, chậm dần cuối
+                double t   = (double)i / steps;
+                double ease = 1.0 - Math.Pow(1.0 - t, 3);
+                int pct = from + (int)(range * ease);
+
+                _ = SendProgressAsync(true, pct);
+                await Task.Delay(stepMs);
             }
         }
 
