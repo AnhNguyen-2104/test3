@@ -136,7 +136,7 @@ namespace DACDT_2026
         /// Read multiple consecutive device words and return them as int[].
         /// Tries several strategies:
         /// 1) If deviceName is Un\Gx, try ReadBuffer then fallback to per-word GetDevice.
-        /// 2) Try plcDevice.ReadDevice (multi-word read) if available.
+        /// 2) Try plcDevice.ReadDeviceBlock2 (multi-word read) if available.
         /// 3) Fallback to plcDevice.GetDevice per sequential address.
         /// </summary>
         public int[] ReadDeviceRange(string deviceName, int count)
@@ -145,10 +145,12 @@ namespace DACDT_2026
             if (string.IsNullOrWhiteSpace(deviceName)) throw new ArgumentNullException(nameof(deviceName));
             if (count <= 0) throw new ArgumentOutOfRangeException(nameof(count));
 
+            var dev = plcDevice;
+            if (dev == null) throw new InvalidOperationException("PLC device đã bị giải phóng.");
+
             // handle Un\Gx style device addresses first
             if (TryParseUDevicePath(deviceName, out int uNumber, out int gAddress))
             {
-                // try ReadBuffer (preferred)
                 try
                 {
                     return ReadBuffer(uNumber, gAddress, count);
@@ -162,12 +164,10 @@ namespace DACDT_2026
                         for (int i = 0; i < count; i++)
                         {
                             string path = $"U{uNumber}\\G{gAddress + i}";
-                            int value;
-                            int res = plcDevice.GetDevice(path, out value);
+                            int value = 0;
+                            int res = dev.GetDevice(path, out value);
                             if (res != 0)
-                            {
                                 throw new Exception($"GetDevice {path} returned {res}");
-                            }
                             arr[i] = value;
                         }
                         return arr;
@@ -180,20 +180,23 @@ namespace DACDT_2026
             }
 
             // try ReadDeviceBlock2 (multi-word read) if available
-            try
+            if (count > 0)
             {
-                short[] arr = new short[count];
-                int result = plcDevice.ReadDeviceBlock2(deviceName, count, out arr[0]);
-                if (result == 0)
+                try
                 {
-                    int[] outArr = new int[count];
-                    for (int i = 0; i < count; i++) outArr[i] = arr[i];
-                    return outArr;
+                    short[] arr = new short[count];
+                    int result = dev.ReadDeviceBlock2(deviceName, count, out arr[0]);
+                    if (result == 0)
+                    {
+                        int[] outArr = new int[count];
+                        for (int i = 0; i < count; i++) outArr[i] = arr[i];
+                        return outArr;
+                    }
                 }
-            }
-            catch
-            {
-                // continue to fallback
+                catch
+                {
+                    // continue to fallback
+                }
             }
 
             // fallback: read each word individually via GetDevice using sequential device numbering
@@ -202,9 +205,8 @@ namespace DACDT_2026
                 var match = Regex.Match(deviceName.Trim(), "^(?<prefix>[A-Za-z]+)(?<address>\\d+)$");
                 if (!match.Success)
                 {
-                    // single device name that isn't sequential - attempt GetDevice once
-                    int singleVal;
-                    int r = plcDevice.GetDevice(deviceName, out singleVal);
+                    int singleVal = 0;
+                    int r = dev.GetDevice(deviceName, out singleVal);
                     if (r == 0) return new int[] { singleVal };
                     throw new Exception($"GetDevice {deviceName} returned {r}");
                 }
@@ -215,15 +217,12 @@ namespace DACDT_2026
                 for (int i = 0; i < count; i++)
                 {
                     string path = prefix + (address + i).ToString(CultureInfo.InvariantCulture);
-                    int val;
-                    int res = plcDevice.GetDevice(path, out val);
+                    int val = 0;
+                    int res = dev.GetDevice(path, out val);
                     if (res != 0)
-                    {
                         throw new Exception($"GetDevice {path} returned {res}");
-                    }
                     resultArr[i] = val;
                 }
-
                 return resultArr;
             }
             catch (Exception ex)
@@ -566,6 +565,7 @@ namespace DACDT_2026
         {
             try { if (isConnected) Disconnect(); } catch { }
             plcDevice = null;
+            isConnected = false;
         }
     }
 }
