@@ -249,6 +249,9 @@ namespace DACDT_2026
         protected Task LogUIAsync(string title, string message)
             => PostToUiAsync("log", new { title, message });
 
+        protected Task SendProgressAsync(bool visible, int percent = 0)
+            => PostToUiAsync("progress", new { visible, percent });
+
         // ── Log helpers ───────────────────────────────────────────────────────────
         private void AddLogEntry(string address, string value,
             string direction = "Write", string status = "OK", string message = null)

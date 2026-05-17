@@ -292,6 +292,26 @@ function handleHostMessage(msg) {
     case "log":
       addLocalEvent("info", msg.payload.title, msg.payload.message);
       break;
+    case "progress":
+      if (msg.payload) {
+        const container = document.getElementById("dxf-progress-container");
+        const fill = document.getElementById("dxf-progress-fill");
+        const text = document.getElementById("dxf-progress-text");
+        const btn = document.getElementById("send-cad-x-button");
+        if (container && fill && text) {
+          if (msg.payload.visible) {
+            container.style.display = "flex";
+            if (btn) btn.style.display = "none";
+            const p = Math.max(0, Math.min(100, msg.payload.percent || 0));
+            fill.style.width = p + "%";
+            text.textContent = Math.round(p) + "%";
+          } else {
+            container.style.display = "none";
+            if (btn) btn.style.display = "block";
+          }
+        }
+      }
+      break;
   }
 }
 

@@ -438,7 +438,12 @@ namespace DACDT_2026
             {
                 // ── BƯỚC 1: Master axis (Axis 1 / X): nạp dữ liệu vào bộ đệm (G2000+) ────
                 // Tắt writeStartNo để máy KHÔNG chạy ngay lập tức.
-                var sendResult = QD75BufferWriter.WritePositioningData(plcComm, 0, dataRows, writeStartNo: false);
+                _ = SendProgressAsync(true, 0);
+                var sendResult = QD75BufferWriter.WritePositioningData(plcComm, 0, dataRows, writeStartNo: false, progressCallback: percent =>
+                {
+                    _ = SendProgressAsync(true, percent / 2);
+                    Application.DoEvents();
+                });
 
                 foreach (var wr in sendResult.WriteResults)
                 {
@@ -454,7 +459,11 @@ namespace DACDT_2026
                 }
 
                 // ── BƯỚC 2: Slave axis (Axis 2 / Y): nạp toạ độ vào bộ đệm (G8006+) ──────
-                var slaveResult = QD75BufferWriter.WriteSlaveAxisData(plcComm, dataRows, slaveBaseG: 8000);
+                var slaveResult = QD75BufferWriter.WriteSlaveAxisData(plcComm, dataRows, slaveBaseG: 8000, progressCallback: percent =>
+                {
+                    _ = SendProgressAsync(true, 50 + percent / 2);
+                    Application.DoEvents();
+                });
 
                 foreach (var wr in slaveResult.WriteResults)
                 {
@@ -475,6 +484,7 @@ namespace DACDT_2026
             }
             finally
             {
+                _ = SendProgressAsync(false, 0);
                 // ── Bật lại poll timer sau khi ghi xong (hoặc lỗi) ──────────────────
                 if (plcComm != null && plcComm.IsConnected && !isClosing)
                     plcPollTimer.Start();

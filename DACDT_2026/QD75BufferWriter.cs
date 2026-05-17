@@ -211,8 +211,9 @@ namespace DACDT_2026
         /// <param name="axisIndex">Axis index (0=X, 1=Y, 2=Z, 3=A).</param>
         /// <param name="rows">List of positioning data rows to write.</param>
         /// <param name="writeStartNo">If true, write 1 to the Control Start No. register after all data.</param>
+        /// <param name="progressCallback">Optional callback for progress reporting (0-100).</param>
         /// <returns>SendResult with all write results and overall success status.</returns>
-        public static SendResult WritePositioningData(PLCCommunication plcComm, int axisIndex, List<PositioningDataRow> rows, bool writeStartNo = true)
+        public static SendResult WritePositioningData(PLCCommunication plcComm, int axisIndex, List<PositioningDataRow> rows, bool writeStartNo = true, Action<int> progressCallback = null)
         {
             var result = new SendResult { Success = true };
 
@@ -322,6 +323,11 @@ namespace DACDT_2026
                     result.Success = false;
                 }
 
+                if (progressCallback != null && n % 5 == 0)
+                {
+                    progressCallback((n * 100) / rows.Count);
+                }
+
                 n++;
             }
 
@@ -367,8 +373,9 @@ namespace DACDT_2026
         /// <param name="plcComm">Connected PLCCommunication instance.</param>
         /// <param name="rows">List of positioning data rows. Only EndCoordinate (Y axis) and CenterCoordinate (Y) are used.</param>
         /// <param name="slaveBaseG">Buffer base address for slave axis. Default = 8000 (Axis 2).</param>
+        /// <param name="progressCallback">Optional callback for progress reporting (0-100).</param>
         /// <returns>SendResult with all write results.</returns>
-        public static SendResult WriteSlaveAxisData(PLCCommunication plcComm, List<PositioningDataRow> rows, int slaveBaseG = 8000)
+        public static SendResult WriteSlaveAxisData(PLCCommunication plcComm, List<PositioningDataRow> rows, int slaveBaseG = 8000, Action<int> progressCallback = null)
         {
             var result = new SendResult { Success = true };
 
@@ -430,6 +437,11 @@ namespace DACDT_2026
                         Message = ex.Message
                     });
                     result.Success = false;
+                }
+
+                if (progressCallback != null && n % 5 == 0)
+                {
+                    progressCallback((n * 100) / rows.Count);
                 }
 
                 n++;

@@ -239,6 +239,13 @@
           <button id="set-speed-btn" class="primary-button compact" style="background:var(--cyan);color:#fff;">Set Speed</button>
 
           <div style="flex:1;"></div>
+          <!-- Progress Bar -->
+          <div id="dxf-progress-container" style="display:none; align-items:center; margin-right: 12px; gap: 8px;">
+            <div style="width: 150px; height: 8px; background: rgba(255,255,255,0.1); border-radius: 4px; overflow: hidden;">
+              <div id="dxf-progress-fill" style="width: 0%; height: 100%; background: var(--cyan); transition: width 0.1s linear;"></div>
+            </div>
+            <span id="dxf-progress-text" style="font-size: 11px; color: var(--muted); min-width: 30px;">0%</span>
+          </div>
           <!-- Send to PLC -->
           <button id="send-cad-x-button" class="primary-button compact" style="background:linear-gradient(135deg, #10b981, #059669); font-size: 13px; padding: 0 16px;">Send CAD to PLC</button>
         </div>
