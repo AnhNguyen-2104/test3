@@ -80,7 +80,7 @@ namespace DACDT_2026
         }
 
         /// <summary>
-        /// Read buffer memory (Un\Gx) using MX Component ReadBuffer if available.
+        /// Read buffer memory (Un\Gx) using MX Component ReadDeviceBlock2 if available.
         /// Returns an int[] of length 'count' with values read from the buffer.
         /// </summary>
         public int[] ReadBuffer(int startIO, int address, int count)
@@ -88,6 +88,27 @@ namespace DACDT_2026
             if (!isConnected) throw new InvalidOperationException("Chưa kết nối PLC");
             if (count <= 0) throw new ArgumentOutOfRangeException(nameof(count));
 
+            string startDevice = $"U{startIO:X}\\G{address}";
+
+            // ── Thử ReadDeviceBlock2: 1 COM call cho toàn bộ mảng ───────────────
+            try
+            {
+                short[] shorts = new short[count];
+                int res = plcDevice.ReadDeviceBlock2(startDevice, count, out shorts[0]);
+                if (res == 0)
+                {
+                    int[] result = new int[count];
+                    for (int i = 0; i < count; i++) result[i] = shorts[i];
+                    return result;
+                }
+                // Nếu trả về lỗi thì fallback
+            }
+            catch
+            {
+                // ReadDeviceBlock2 không hỗ trợ U\G trên một số driver → fallback
+            }
+
+            // ── Fallback: GetDevice từng word ────────────────────────────────────
             try
             {
                 int[] ints = new int[count];
@@ -99,9 +120,7 @@ namespace DACDT_2026
                         int value = 0;
                         int result = plcDevice.GetDevice(devName, out value);
                         if (result != 0)
-                        {
                             throw new Exception($"GetDevice {devName} failed: {result:X}");
-                        }
                         ints[i] = value;
                     }
                 }
@@ -263,12 +282,29 @@ namespace DACDT_2026
 
         /// <summary>
         /// Ghi dữ liệu vào Buffer Memory module thông minh.
-        /// Xử lý triệt để lỗi "Could not convert argument 0".
+        /// Dùng WriteDeviceBlock2 để ghi toàn bộ mảng trong 1 COM call duy nhất.
+        /// Fallback về SetDevice2 từng word nếu WriteDeviceBlock2 không hỗ trợ.
         /// </summary>
         public int WriteBuffer(int startIO, int address, short[] data)
         {
             if (!isConnected) throw new InvalidOperationException("Chưa kết nối PLC");
             if (data == null || data.Length == 0) throw new ArgumentException("Khong co du lieu de ghi.", nameof(data));
+
+            string startDevice = $"U{startIO:X}\\G{address}";
+
+            // ── Thử WriteDeviceBlock2: 1 COM call cho toàn bộ mảng ──────────────
+            try
+            {
+                int res = plcDevice.WriteDeviceBlock2(startDevice, data.Length, ref data[0]);
+                if (res == 0) return 0;
+                // Nếu trả về lỗi (không phải exception) thì fallback
+            }
+            catch
+            {
+                // WriteDeviceBlock2 không hỗ trợ U\G trên một số driver → fallback
+            }
+
+            // ── Fallback: SetDevice2 từng word ───────────────────────────────────
             try
             {
                 int res = 0;
