@@ -126,6 +126,7 @@ namespace DACDT_2026
 
                     case "importCadToProcess":
                         await HandleImportCadToProcessAsync();
+                        await PushDxfStateAsync();
                         break;
 
                     case "saveGcode":

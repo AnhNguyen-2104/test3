@@ -455,16 +455,18 @@ function renderDxf() {
 function renderPointsTable() {
   const points = state.dxf.points || [], primitives = state.dxf.primitives || [], rows = [];
   function pz(p) { return p && p.z != null ? Number(p.z) : 0; }
-  function findPK(x, y, z) {
-    const zz = z != null && z !== undefined ? Number(z) : 0;
-    const p = points.find(pt => Math.abs((pt.x || 0) - x) < 1e-3 && Math.abs((pt.y || 0) - y) < 1e-3 && Math.abs(pz(pt) - zz) < 1e-3);
-    return p ? p.key : "";
+
+  // Build lookup map một lần O(n) thay vì find() O(n) mỗi điểm
+  const pointMap = new Map();
+  for (const pt of points) {
+    const k = `${Math.round((pt.x||0)*1000)},${Math.round((pt.y||0)*1000)},${Math.round(pz(pt)*1000)}`;
+    if (!pointMap.has(k)) pointMap.set(k, pt);
   }
-  function findPI(x, y, z) {
-    const zz = z != null && z !== undefined ? Number(z) : 0;
-    const p = points.find(pt => Math.abs((pt.x || 0) - x) < 1e-3 && Math.abs((pt.y || 0) - y) < 1e-3 && Math.abs(pz(pt) - zz) < 1e-3);
-    return p && p.index != null ? p.index : "";
+  function findPt(x, y, z) {
+    const k = `${Math.round(x*1000)},${Math.round(y*1000)},${Math.round(z*1000)}`;
+    return pointMap.get(k);
   }
+
   let ai = 1;
   for (const prim of primitives) {
     if (!prim.points || !prim.points.length) continue;
@@ -481,11 +483,17 @@ function renderPointsTable() {
     }
     if (dt === "Line" || dt === "Rapid (G0)") {
       for (let j = 0; j < prim.points.length - 1; j++) {
-        const s = prim.points[j], e = prim.points[j + 1], key = findPK(s.x, s.y, pz(s)), stt = findPI(s.x, s.y, pz(s)) || ai++;
+        const s = prim.points[j], e = prim.points[j + 1];
+        const found = findPt(s.x, s.y, pz(s));
+        const key = found ? found.key : "";
+        const stt = (found && found.index != null) ? found.index : ai++;
         rows.push(`<tr data-point-key="${esc(key)}"><td>${esc(stt)}</td><td>${esc(dt)}</td><td>${Number(s.x).toFixed(3)}</td><td>${Number(s.y).toFixed(3)}</td><td>${pz(s).toFixed(3)}</td><td>${Number(e.x).toFixed(3)}</td><td>${Number(e.y).toFixed(3)}</td><td>${pz(e).toFixed(3)}</td><td></td><td></td><td></td></tr>`);
       }
     } else {
-      const s = prim.points[0], e = prim.points[prim.points.length - 1], key = findPK(s.x, s.y, pz(s)), stt = findPI(s.x, s.y, pz(s)) || ai++;
+      const s = prim.points[0], e = prim.points[prim.points.length - 1];
+      const found = findPt(s.x, s.y, pz(s));
+      const key = found ? found.key : "";
+      const stt = (found && found.index != null) ? found.index : ai++;
       rows.push(`<tr data-point-key="${esc(key)}"><td>${esc(stt)}</td><td>${esc(dt)}</td><td>${Number(s.x).toFixed(3)}</td><td>${Number(s.y).toFixed(3)}</td><td>${pz(s).toFixed(3)}</td><td>${Number(e.x).toFixed(3)}</td><td>${Number(e.y).toFixed(3)}</td><td>${pz(e).toFixed(3)}</td><td>${esc(cx)}</td><td>${esc(cy)}</td><td>${esc(cz)}</td></tr>`);
     }
   }
@@ -494,12 +502,14 @@ function renderPointsTable() {
 
 function renderProcessTable() {
   const rows = state.dxf.processRows || [];
-  const hasOffset = rows.some(r => r.endCoordinateDisplay && r.endCoordinateDisplay !== r.endCoordinate);
-  dom.processBody.innerHTML = rows.map((r, i) => {
+  const MAX_VISIBLE = 300;
+  const visible = rows.slice(0, MAX_VISIBLE);
+  const overflow = rows.length - visible.length;
+  dom.processBody.innerHTML = visible.map((r, i) => {
     const endDisp   = r.endCoordinateDisplay   || r.endCoordinate   || "";
     const centDisp  = r.centerCoordinateDisplay || r.centerCoordinate || "";
     return `<tr data-process-index="${i}"><td>${esc(r.motionType || "")}</td><td><input type="text" class="text-input compact" style="margin:0;width:100%;min-width:80px" data-process-index="${i}" data-process-field="mcode" value="${esc(r.mCodeValue || "")}"></td><td><input type="text" class="text-input compact" style="margin:0;width:100%;min-width:60px" data-process-index="${i}" data-process-field="dwell" value="${esc(r.dwell || "")}"></td><td><input type="text" class="text-input compact" style="margin:0;width:100%;min-width:60px" data-process-index="${i}" data-process-field="speed" value="${esc(r.speed || "")}"></td><td>${esc(endDisp)}</td><td>${esc(centDisp)}</td></tr>`;
-  }).join("");
+  }).join("") + (overflow > 0 ? `<tr><td colspan="6" style="text-align:center;color:var(--muted);font-size:11px;padding:6px;">... còn ${overflow} dòng nữa (tổng ${rows.length})</td></tr>` : "");
 }
 
 function renderCadPreview() {

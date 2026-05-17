@@ -82,66 +82,98 @@ namespace DACDT_2026
         }
 
         // ── DXF / Process state ──────────────────────────────────────────────────
-        private Task PushDxfStateAsync()
+        private async Task PushDxfStateAsync()
         {
-            var payload = new
+            // Snapshot tất cả dữ liệu cần thiết trên UI thread trước khi chuyển sang background
+            var snapDoc        = activeCadDocument;
+            var snapRows       = processRows.ToList();
+            var snapKind       = activeDocumentKind;
+            var snapView       = currentView;
+            var snapTheme      = currentTheme;
+            var snapSpeed      = globalSpeed;
+            var snapOx         = offsetX;
+            var snapOy         = offsetY;
+            var snapPointKey   = selectedCadPointKey ?? string.Empty;
+            var snapAssigned   = new System.Collections.Generic.Dictionary<string, string>(assignedPointKeys);
+            var snapRawText    = snapKind == "GCODE" ? rawGcodeText : string.Empty;
+
+            // Serialize toàn bộ payload trên background thread — không block UI
+            string json = await Task.Run(() =>
             {
-                view     = currentView,
-                theme    = currentTheme,
-                fileKind = activeDocumentKind,
-                filePath = activeCadDocument?.FilePath ?? string.Empty,
-                fileName = activeCadDocument?.FileName ?? string.Empty,
-                rawText  = activeDocumentKind == "GCODE" 
-                    ? (rawGcodeText != null && rawGcodeText.Length > 500000 ? rawGcodeText.Substring(0, 500000) + "\n... [TRUNCATED FOR UI]" : rawGcodeText)
-                    : string.Empty,
-                globalSpeed,
-                offsetX,
-                offsetY,
-                bounds   = activeCadDocument == null
+                string rawTrunc = snapRawText != null && snapRawText.Length > 200000
+                    ? snapRawText.Substring(0, 200000) + "\n... [TRUNCATED FOR UI]"
+                    : snapRawText ?? string.Empty;
+
+                object boundsObj = snapDoc == null
                     ? (object)new { left = 0.0, top = 0.0, right = 100.0, bottom = 100.0, width = 100.0, height = 100.0, minZ = 0.0, maxZ = 0.0 }
                     : new
                     {
-                        left   = activeCadDocument.Bounds.Left,
-                        top    = activeCadDocument.Bounds.Top,
-                        right  = activeCadDocument.Bounds.Right,
-                        bottom = activeCadDocument.Bounds.Bottom,
-                        width  = activeCadDocument.Bounds.Width,
-                        height = activeCadDocument.Bounds.Height,
-                        minZ   = activeCadDocument.Bounds.MinZ,
-                        maxZ   = activeCadDocument.Bounds.MaxZ
-                    },
-                primitives = activeCadDocument == null
+                        left   = snapDoc.Bounds.Left,
+                        top    = snapDoc.Bounds.Top,
+                        right  = snapDoc.Bounds.Right,
+                        bottom = snapDoc.Bounds.Bottom,
+                        width  = snapDoc.Bounds.Width,
+                        height = snapDoc.Bounds.Height,
+                        minZ   = snapDoc.Bounds.MinZ,
+                        maxZ   = snapDoc.Bounds.MaxZ
+                    };
+
+                // Giới hạn primitives gửi lên UI: 2000 primitives, mỗi arc tối đa 12 điểm
+                const int MaxPrimitives = 2000;
+                const int MaxArcPoints  = 12; // đủ để vẽ mượt, không cần 36
+                var primList = snapDoc == null
                     ? new System.Collections.Generic.List<object>()
-                    : activeCadDocument.Primitives.Take(5000).Select(p => (object)new
+                    : snapDoc.Primitives.Take(MaxPrimitives).Select(p =>
                     {
-                        sourceType = p.SourceType,
-                        points     = p.Points.Select(pt => new { x = pt.X, y = pt.Y, z = pt.Z }).ToList(),
-                        center     = p.Center != null ? new { x = p.Center.X, y = p.Center.Y, z = p.Center.Z } : (object)null,
-                        isCw       = p.IsCw,
-                        isCircle   = p.IsCircle
-                    }).ToList(),
-                points = activeCadDocument == null
+                        var pts = p.Points;
+                        // Downsample arc points nếu quá nhiều
+                        System.Collections.Generic.List<object> ptObjs;
+                        if (pts.Count > MaxArcPoints)
+                        {
+                            ptObjs = new System.Collections.Generic.List<object>(MaxArcPoints + 1);
+                            double step = (double)(pts.Count - 1) / (MaxArcPoints - 1);
+                            for (int si = 0; si < MaxArcPoints; si++)
+                            {
+                                var pt = pts[(int)Math.Round(si * step)];
+                                ptObjs.Add(new { x = Math.Round(pt.X, 3), y = Math.Round(pt.Y, 3), z = Math.Round(pt.Z, 3) });
+                            }
+                        }
+                        else
+                        {
+                            ptObjs = pts.Select(pt => (object)new { x = Math.Round(pt.X, 3), y = Math.Round(pt.Y, 3), z = Math.Round(pt.Z, 3) }).ToList();
+                        }
+                        return (object)new
+                        {
+                            sourceType = p.SourceType,
+                            points     = ptObjs,
+                            center     = p.Center != null ? new { x = Math.Round(p.Center.X, 3), y = Math.Round(p.Center.Y, 3), z = Math.Round(p.Center.Z, 3) } : (object)null,
+                            isCw       = p.IsCw,
+                            isCircle   = p.IsCircle
+                        };
+                    }).ToList();
+
+                // Giới hạn points: 2000
+                var ptList = snapDoc == null
                     ? new System.Collections.Generic.List<object>()
-                    : activeCadDocument.Points.Take(5000).Select(pt => (object)new
+                    : snapDoc.Points.Take(2000).Select(pt => (object)new
                     {
                         index    = pt.Index,
                         lineType = pt.LineType,
-                        x        = pt.X,
-                        y        = pt.Y,
-                        z        = pt.Z,
+                        x        = Math.Round(pt.X, 3),
+                        y        = Math.Round(pt.Y, 3),
+                        z        = Math.Round(pt.Z, 3),
                         xDisplay = pt.XDisplay,
                         yDisplay = pt.YDisplay,
                         zDisplay = pt.ZDisplay,
                         key      = pt.Key
-                    }).ToList(),
-                selectedPointKey  = selectedCadPointKey ?? string.Empty,
-                assignedPointKeys,
-                processRows = processRows.Take(5000).Select(row =>
+                    }).ToList();
+
+                // Giới hạn processRows: 2000, tính offset sẵn
+                var rowList = snapRows.Take(2000).Select(row =>
                 {
-                    // Parse raw end coordinate and apply offset for display
-                    string endWithOffset    = ApplyOffsetToCoord(row.EndCoordinate,    offsetX, offsetY);
-                    string centerWithOffset = ApplyOffsetToCoord(row.CenterCoordinate, offsetX, offsetY);
-                    return new
+                    string endWithOffset    = ApplyOffsetToCoord(row.EndCoordinate,    snapOx, snapOy);
+                    string centerWithOffset = ApplyOffsetToCoord(row.CenterCoordinate, snapOx, snapOy);
+                    return (object)new
                     {
                         key              = row.Key,
                         motionType       = row.MotionType,
@@ -153,10 +185,46 @@ namespace DACDT_2026
                         endCoordinateDisplay    = endWithOffset,
                         centerCoordinateDisplay = centerWithOffset
                     };
-                }).ToList()
-            };
+                }).ToList();
 
-            return PostToUiAsync("dxfState", payload);
+                var payload = new
+                {
+                    view     = snapView,
+                    theme    = snapTheme,
+                    fileKind = snapKind,
+                    filePath = snapDoc?.FilePath ?? string.Empty,
+                    fileName = snapDoc?.FileName ?? string.Empty,
+                    rawText  = rawTrunc,
+                    globalSpeed = snapSpeed,
+                    offsetX  = snapOx,
+                    offsetY  = snapOy,
+                    bounds   = boundsObj,
+                    primitives       = primList,
+                    points           = ptList,
+                    selectedPointKey = snapPointKey,
+                    assignedPointKeys = snapAssigned,
+                    processRows      = rowList
+                };
+
+                return serializer.Serialize(new { type = "dxfState", payload });
+            });
+
+            // Gửi JSON đã serialize lên WebView2 trên UI thread
+            if (isClosing || !webReady) return;
+            Action post = () =>
+            {
+                try
+                {
+                    if (!isClosing && webReady && webView != null && !webView.IsDisposed && webView.CoreWebView2 != null)
+                        webView.CoreWebView2.PostWebMessageAsJson(json);
+                }
+                catch (Exception ex)
+                {
+                    System.Diagnostics.Debug.WriteLine("PushDxfStateAsync post error: " + ex.Message);
+                }
+            };
+            if (webView.InvokeRequired) webView.BeginInvoke(post);
+            else post();
         }
 
         /// <summary>

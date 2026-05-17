@@ -426,7 +426,7 @@ namespace DACDT_2026
             processRows.Clear();
             processRows.AddRange(rows);
 
-            await PushDxfStateAsync();
+            // Không gọi PushDxfStateAsync ở đây — caller sẽ gọi sau khi cần
             await LogUIAsync("DXF", $"Compiled {rows.Count} movement commands into the process table.");
         }
 
