@@ -20,6 +20,11 @@ let modalSubmit = null;
 let cadPanX = 0, cadPanY = 0, cadZoom = 1, isCadPanning = false, startCadPanX = 0, startCadPanY = 0;
 
 window.app = { receive(m) { handleHostMessage(m || {}); } };
+if (host) {
+  host.addEventListener('message', e => {
+    handleHostMessage(e.data || {});
+  });
+}
 // Expose state globally for cad3d.js access
 window.cadState = state;
 

@@ -91,7 +91,9 @@ namespace DACDT_2026
                 fileKind = activeDocumentKind,
                 filePath = activeCadDocument?.FilePath ?? string.Empty,
                 fileName = activeCadDocument?.FileName ?? string.Empty,
-                rawText  = activeDocumentKind == "GCODE" ? rawGcodeText : string.Empty,
+                rawText  = activeDocumentKind == "GCODE" 
+                    ? (rawGcodeText != null && rawGcodeText.Length > 500000 ? rawGcodeText.Substring(0, 500000) + "\n... [TRUNCATED FOR UI]" : rawGcodeText)
+                    : string.Empty,
                 globalSpeed,
                 offsetX,
                 offsetY,
@@ -110,7 +112,7 @@ namespace DACDT_2026
                     },
                 primitives = activeCadDocument == null
                     ? new System.Collections.Generic.List<object>()
-                    : activeCadDocument.Primitives.Select(p => (object)new
+                    : activeCadDocument.Primitives.Take(5000).Select(p => (object)new
                     {
                         sourceType = p.SourceType,
                         points     = p.Points.Select(pt => new { x = pt.X, y = pt.Y, z = pt.Z }).ToList(),
@@ -120,7 +122,7 @@ namespace DACDT_2026
                     }).ToList(),
                 points = activeCadDocument == null
                     ? new System.Collections.Generic.List<object>()
-                    : activeCadDocument.Points.Select(pt => (object)new
+                    : activeCadDocument.Points.Take(5000).Select(pt => (object)new
                     {
                         index    = pt.Index,
                         lineType = pt.LineType,
@@ -134,7 +136,7 @@ namespace DACDT_2026
                     }).ToList(),
                 selectedPointKey  = selectedCadPointKey ?? string.Empty,
                 assignedPointKeys,
-                processRows = processRows.Select(row =>
+                processRows = processRows.Take(5000).Select(row =>
                 {
                     // Parse raw end coordinate and apply offset for display
                     string endWithOffset    = ApplyOffsetToCoord(row.EndCoordinate,    offsetX, offsetY);
@@ -281,20 +283,23 @@ namespace DACDT_2026
         }
 
         // ── PostToUiAsync ─────────────────────────────────────────────────────────
-        private async Task PostToUiAsync(string type, object payload)
+        private Task PostToUiAsync(string type, object payload)
         {
-            if (isClosing || !webReady) return;
+            if (isClosing || !webReady) return Task.CompletedTask;
 
             try
             {
-                if (webView == null || webView.IsDisposed || webView.CoreWebView2 == null) return;
+                if (webView == null || webView.IsDisposed || webView.CoreWebView2 == null) return Task.CompletedTask;
 
                 string json = serializer.Serialize(new { type, payload });
-                await webView.CoreWebView2.ExecuteScriptAsync(
-                    "window.app && window.app.receive(" + json + ");");
+                webView.CoreWebView2.PostWebMessageAsJson(json);
             }
-            catch (ObjectDisposedException) { }
-            catch (InvalidOperationException) { }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine("PostToUiAsync error: " + ex.Message);
+            }
+            
+            return Task.CompletedTask;
         }
 
         // ── JSON message helper getters ───────────────────────────────────────────
