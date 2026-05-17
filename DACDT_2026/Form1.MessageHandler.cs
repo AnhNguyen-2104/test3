@@ -43,7 +43,7 @@ namespace DACDT_2026
                         await HandleConnectToggleAsync(payload);
                         break;
 
-                    // ── PLC Motion Control ───────────────────────────────────────
+                    // ── PLC Motion Control ──────────────────────────────────────
                     case "setVelocity":
                         await HandleSetVelocityAsync(GetInt(payload, "value", 0));
                         break;

@@ -419,8 +419,15 @@ namespace DACDT_2026
                 if (glueEndCoord != null && string.Equals(row.EndCoordinate, glueEndCoord))
                     row.MCodeValue = "2";
 
-                if (string.IsNullOrEmpty(row.Speed) && !isGcodeDoc)
-                    row.Speed = snapSpeed;
+                if (string.IsNullOrEmpty(row.Speed))
+                {
+                    // DXF: dùng globalSpeed làm fallback
+                    // GCODE Rapid3: đã được gán rapidSpeed trong BuildConnectedPathsFromCad
+                    // GCODE G1/G2/G3 không có F: không gán fallback — speed = 0 là hợp lệ
+                    //   (PLC sẽ dùng speed từ lệnh trước theo modal của module)
+                    if (!isGcodeDoc)
+                        row.Speed = snapSpeed;
+                }
             }
 
             processRows.Clear();
@@ -448,13 +455,27 @@ namespace DACDT_2026
             // Map ProcessRow → QD75BufferWriter.PositioningDataRow (tọa độ đã cộng offset)
             var dataRows = new List<QD75BufferWriter.PositioningDataRow>();
             string lastSpeed = globalSpeed; // fallback to globalSpeed if no F at all
+            string snapRapid = rapidSpeed;  // snapshot rapidSpeed cho G0
 
             foreach (var row in processRows)
             {
-                if (!string.IsNullOrEmpty(row.Speed))
+                // Xác định speed thực sự gửi xuống PLC
+                string sendSpeed;
+                bool rowIsRapid = row.MotionType.Contains("Rapid3") || row.MotionType.Contains("Rapid");
+
+                if (rowIsRapid)
                 {
-                    if (int.TryParse(row.Speed, out int s) && s > 0)
+                    // G0: luôn dùng rapidSpeed, không phụ thuộc vào F trong file
+                    sendSpeed = snapRapid;
+                }
+                else
+                {
+                    // G1/G2/G3: dùng speed từ row (đã là modal F đúng), fallback globalSpeed
+                    if (!string.IsNullOrEmpty(row.Speed) && int.TryParse(row.Speed, out int s) && s > 0)
+                    {
                         lastSpeed = row.Speed;
+                    }
+                    sendSpeed = lastSpeed;
                 }
 
                 dataRows.Add(new QD75BufferWriter.PositioningDataRow
@@ -462,7 +483,7 @@ namespace DACDT_2026
                     MotionType       = row.MotionType,
                     MCodeValue       = row.MCodeValue,
                     Dwell            = row.Dwell,
-                    Speed            = row.Speed,
+                    Speed            = sendSpeed,
                     EndCoordinate    = ApplyOffsetToCoordSend(row.EndCoordinate,    offsetX, offsetY),
                     CenterCoordinate = ApplyOffsetToCoordSend(row.CenterCoordinate, offsetX, offsetY),
                     EndZ             = row.EndZ

@@ -58,7 +58,7 @@ namespace DACDT_2026
             bool absoluteMode = true;
             bool hasCurrentPoint = false;
             int modalMotion = 1;
-            double? modalF = null;
+            double? modalF = null;      // Modal F cho G1/G2/G3 — chỉ cập nhật khi không phải G0
             int? modalM = null;
 
             foreach (string rawLine in lines)
@@ -115,7 +115,8 @@ namespace DACDT_2026
                     : modalMotion;
 
                 double? currentF = frame.F.HasValue ? frame.F.Value : (double?)null;
-                if (frame.F.HasValue) modalF = frame.F.Value;
+                // modalF chỉ cập nhật khi motion là G1/G2/G3 — G0 không ảnh hưởng modal feed
+                if (frame.F.HasValue && motion != 0) modalF = frame.F.Value;
                 if (frame.M.HasValue) modalM = frame.M.Value;
 
                 bool hasCoordinate = frame.X.HasValue || frame.Y.HasValue || frame.Z.HasValue;
@@ -146,7 +147,12 @@ namespace DACDT_2026
                 if (isArc)
                     AddArcPrimitive(result, frame, startPoint, nextPoint, motion == 2, unitScale, modalF, modalM, frame.P);
                 else if (!AreClose(startPoint, nextPoint))
-                    AddLinePrimitive(result, startPoint, nextPoint, motion == 0, modalF, modalM, frame.P);
+                {
+                    bool isRapid = motion == 0;
+                    // G0 Rapid: không lưu speed từ file — speed sẽ được gán từ rapidSpeed khi build ProcessRow
+                    double? lineSpeed = isRapid ? (double?)null : modalF;
+                    AddLinePrimitive(result, startPoint, nextPoint, isRapid, lineSpeed, modalM, frame.P);
+                }
 
                 currentX = nextX;
                 currentY = nextY;
