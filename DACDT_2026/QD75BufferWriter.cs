@@ -76,6 +76,7 @@ namespace DACDT_2026
         {
             public bool Success { get; set; }
             public string ErrorMessage { get; set; }
+            public int RowCount { get; set; }
             public List<WriteResult> WriteResults { get; set; } = new List<WriteResult>();
         }
 
@@ -360,6 +361,7 @@ namespace DACDT_2026
                 }
             }
 
+            result.RowCount = rows.Count;
             return result;
         }
 
@@ -447,6 +449,7 @@ namespace DACDT_2026
                 n++;
             }
 
+            result.RowCount = rows.Count;
             return result;
         }
 
@@ -672,6 +675,7 @@ namespace DACDT_2026
                 }
             }
 
+            result.RowCount = rows.Count;
             return result;
         }
 
@@ -748,6 +752,7 @@ namespace DACDT_2026
                 result.ErrorMessage = ex.Message;
             }
 
+            result.RowCount = rows.Count;
             return result;
         }
 

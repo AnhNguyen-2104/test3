@@ -501,7 +501,8 @@ namespace DACDT_2026
                     return;
                 }
 
-                await NotifyAsync("success", "PLC", $"CAD data loaded: {dataRows.Count} points → Axis 1 (G2000+) & Axis 2 (G8006+). Press START ACTION to run.");
+                await NotifyAsync("success", "PLC",
+                    $"Đã nạp {sendResult.RowCount} dòng lệnh → Axis 1 (G2000+) & Axis 2 (G8000+). Nhấn START ACTION để chạy.");
             }
             finally
             {
