@@ -11,6 +11,17 @@ namespace DACDT_2026
         private bool isConnected = false;
         private readonly object commLock = new object();
 
+        // Thread-safe accessor — ném exception rõ ràng thay vì NullReferenceException
+        private ActUtlTypeLib.ActUtlType Dev
+        {
+            get
+            {
+                var d = plcDevice;
+                if (d == null) throw new InvalidOperationException("PLC device đã bị giải phóng.");
+                return d;
+            }
+        }
+
         public string IPAddress { get; set; }
         public int Port { get; set; } = 2000;
         public int LogicalStationNumber { get; set; } = 0;
@@ -74,7 +85,7 @@ namespace DACDT_2026
         {
             if (!isConnected) throw new InvalidOperationException("Chưa kết nối PLC");
             short[] arr = new short[count];
-            int result = plcDevice.ReadDeviceBlock2(deviceName, count, out arr[0]);
+            int result = Dev.ReadDeviceBlock2(deviceName, count, out arr[0]);
             if (result == 0) return arr;
             throw new Exception($"Lỗi ReadDevice: {result}");
         }
@@ -88,13 +99,16 @@ namespace DACDT_2026
             if (!isConnected) throw new InvalidOperationException("Chưa kết nối PLC");
             if (count <= 0) throw new ArgumentOutOfRangeException(nameof(count));
 
+            var dev = plcDevice;
+            if (dev == null) throw new InvalidOperationException("PLC device đã bị giải phóng.");
+
             string startDevice = $"U{startIO:X}\\G{address}";
 
             // ── Thử ReadDeviceBlock2: 1 COM call cho toàn bộ mảng ───────────────
             try
             {
                 short[] shorts = new short[count];
-                int res = plcDevice.ReadDeviceBlock2(startDevice, count, out shorts[0]);
+                int res = dev.ReadDeviceBlock2(startDevice, count, out shorts[0]);
                 if (res == 0)
                 {
                     int[] result = new int[count];
@@ -118,7 +132,7 @@ namespace DACDT_2026
                     {
                         string devName = $"U{startIO:X}\\G{address + i}";
                         int value = 0;
-                        int result = plcDevice.GetDevice(devName, out value);
+                        int result = dev.GetDevice(devName, out value);
                         if (result != 0)
                             throw new Exception($"GetDevice {devName} failed: {result:X}");
                         ints[i] = value;
@@ -136,8 +150,8 @@ namespace DACDT_2026
         /// Read multiple consecutive device words and return them as int[].
         /// Tries several strategies:
         /// 1) If deviceName is Un\Gx, try ReadBuffer then fallback to per-word GetDevice.
-        /// 2) Try plcDevice.ReadDeviceBlock2 (multi-word read) if available.
-        /// 3) Fallback to plcDevice.GetDevice per sequential address.
+        /// 2) Try Dev.ReadDeviceBlock2 (multi-word read) if available.
+        /// 3) Fallback to Dev.GetDevice per sequential address.
         /// </summary>
         public int[] ReadDeviceRange(string deviceName, int count)
         {
@@ -252,17 +266,17 @@ namespace DACDT_2026
             // Nếu là thanh ghi D, đọc 2 words liên tiếp để ghép thành 32-bit
             if (deviceName.StartsWith("D", StringComparison.OrdinalIgnoreCase) && TryGetNextWordDevice(deviceName, out string nextWordDevice))
             {
-                int resLow = plcDevice.GetDevice(deviceName, out int low);
+                int resLow = Dev.GetDevice(deviceName, out int low);
                 if (resLow != 0) throw new Exception($"Lỗi GetDevice {deviceName}: {GetErrorMessage(resLow)}");
 
-                int resHigh = plcDevice.GetDevice(nextWordDevice, out int high);
+                int resHigh = Dev.GetDevice(nextWordDevice, out int high);
                 if (resHigh != 0) throw new Exception($"Lỗi GetDevice {nextWordDevice}: {GetErrorMessage(resHigh)}");
 
                 return (high << 16) | (low & 0xFFFF);
             }
 
             int value = 0;
-            int result = plcDevice.GetDevice(deviceName, out value);
+            int result = Dev.GetDevice(deviceName, out value);
             if (result == 0) return value;
 
             throw new Exception($"Lỗi GetDevice {deviceName}: {GetErrorMessage(result)}");
@@ -294,7 +308,7 @@ namespace DACDT_2026
             // ── Thử WriteDeviceBlock2: 1 COM call cho toàn bộ mảng ──────────────
             try
             {
-                int res = plcDevice.WriteDeviceBlock2(startDevice, data.Length, ref data[0]);
+                int res = Dev.WriteDeviceBlock2(startDevice, data.Length, ref data[0]);
                 if (res == 0) return 0;
                 // Nếu trả về lỗi (không phải exception) thì fallback
             }
@@ -312,11 +326,11 @@ namespace DACDT_2026
                     string devName = $"U{startIO:X}\\G{address + i}";
                     try
                     {
-                        res = plcDevice.SetDevice2(devName, data[i]);
+                        res = Dev.SetDevice2(devName, data[i]);
                     }
                     catch (Microsoft.CSharp.RuntimeBinder.RuntimeBinderException)
                     {
-                        res = plcDevice.SetDevice(devName, (int)data[i]);
+                        res = Dev.SetDevice(devName, (int)data[i]);
                     }
                     if (res != 0) return res;
                 }
@@ -344,7 +358,7 @@ namespace DACDT_2026
                 {
                     // Bước 1: Đọc giá trị hiện tại
                     int val;
-                    int resRead = plcDevice.GetDevice($"U{startIO:X}\\G{address}", out val);
+                    int resRead = Dev.GetDevice($"U{startIO:X}\\G{address}", out val);
                     if (resRead != 0) return resRead;
 
                     short current = (short)val;
@@ -358,11 +372,11 @@ namespace DACDT_2026
                     // Bước 4: Ghi xuống PLC
                     try
                     {
-                        return plcDevice.SetDevice2($"U{startIO:X}\\G{address}", current);
+                        return Dev.SetDevice2($"U{startIO:X}\\G{address}", current);
                     }
                     catch (Microsoft.CSharp.RuntimeBinder.RuntimeBinderException)
                     {
-                        return plcDevice.SetDevice($"U{startIO:X}\\G{address}", (int)current);
+                        return Dev.SetDevice($"U{startIO:X}\\G{address}", (int)current);
                     }
                 }
                 catch (Exception ex)
@@ -388,7 +402,7 @@ namespace DACDT_2026
                 try
                 {
                     int val;
-                    int resRead = plcDevice.GetDevice($"U{startIO:X}\\G{address}", out val);
+                    int resRead = Dev.GetDevice($"U{startIO:X}\\G{address}", out val);
                     if (resRead != 0) return resRead;
 
                     short current = (short)val;
@@ -399,11 +413,11 @@ namespace DACDT_2026
 
                     try
                     {
-                        return plcDevice.SetDevice2($"U{startIO:X}\\G{address}", current);
+                        return Dev.SetDevice2($"U{startIO:X}\\G{address}", current);
                     }
                     catch (Microsoft.CSharp.RuntimeBinder.RuntimeBinderException)
                     {
-                        return plcDevice.SetDevice($"U{startIO:X}\\G{address}", (int)current);
+                        return Dev.SetDevice($"U{startIO:X}\\G{address}", (int)current);
                     }
                 }
                 catch (Exception ex)
@@ -454,12 +468,12 @@ namespace DACDT_2026
             usedMethod = "SetDevice2 (16-bit)";
             try
             {
-                return plcDevice.SetDevice2(devicePath, value);
+                return Dev.SetDevice2(devicePath, value);
             }
             catch (Microsoft.CSharp.RuntimeBinder.RuntimeBinderException)
             {
                 usedMethod = "SetDevice (16-bit fallback)";
-                return plcDevice.SetDevice(devicePath, (int)value);
+                return Dev.SetDevice(devicePath, (int)value);
             }
         }
 
@@ -497,7 +511,7 @@ namespace DACDT_2026
             }
 
             usedMethod = "SetDevice";
-            return plcDevice.SetDevice(devicePath, value);
+            return Dev.SetDevice(devicePath, value);
         }
 
         private static bool TryParseUDevicePath(string devicePath, out int uNumber, out int gAddress)
@@ -518,21 +532,21 @@ namespace DACDT_2026
             int result;
             try
             {
-                result = plcDevice.SetDevice2(lowWordDevice, lowWord);
+                result = Dev.SetDevice2(lowWordDevice, lowWord);
             }
             catch (Microsoft.CSharp.RuntimeBinder.RuntimeBinderException)
             {
-                result = plcDevice.SetDevice(lowWordDevice, (int)lowWord);
+                result = Dev.SetDevice(lowWordDevice, (int)lowWord);
             }
             if (result != 0) return result;
 
             try
             {
-                return plcDevice.SetDevice2(highWordDevice, highWord);
+                return Dev.SetDevice2(highWordDevice, highWord);
             }
             catch (Microsoft.CSharp.RuntimeBinder.RuntimeBinderException)
             {
-                return plcDevice.SetDevice(highWordDevice, (int)highWord);
+                return Dev.SetDevice(highWordDevice, (int)highWord);
             }
         }
 

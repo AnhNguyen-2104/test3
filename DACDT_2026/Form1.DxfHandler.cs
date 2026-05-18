@@ -714,6 +714,31 @@ namespace DACDT_2026
                 }
             }
 
+            // ── Post-process: khi chuyển từ 2-axis sang 3-axis (hoặc ngược lại),
+            //    row trước đó phải dừng có giảm tốc (Continuous Positioning).
+            //    Không thể chạy Continuous Path qua ranh giới thay đổi loại interpolation.
+            if (isGcodeDocument)
+            {
+                for (int i = 0; i < result.Count - 1; i++)
+                {
+                    bool currIs3Axis = result[i].MotionType.Contains("Rapid3") || result[i].MotionType.Contains("Linear3");
+                    bool nextIs3Axis = result[i + 1].MotionType.Contains("Rapid3") || result[i + 1].MotionType.Contains("Linear3");
+
+                    if (currIs3Axis != nextIs3Axis)
+                    {
+                        // Chuyển loại interpolation → row hiện tại phải dừng
+                        string mt = result[i].MotionType;
+                        if (mt.Contains("(Continuous Path)"))
+                            result[i].MotionType = mt.Replace("(Continuous Path)", "(Continuous Positioning)");
+                        else if (mt.Contains("(End)"))
+                        {
+                            // Nếu là End thì giữ nguyên — đã dừng rồi
+                        }
+                        // Nếu chưa có suffix (ví dụ Rapid3 không có suffix) thì không cần đổi
+                    }
+                }
+            }
+
             return result;
         }
 
@@ -804,7 +829,7 @@ namespace DACDT_2026
         }
 
         private bool AreClose(CadDocumentService.CadCoordinate a, CadDocumentService.CadCoordinate b)
-            => Math.Abs(a.X - b.X) < 0.001 && Math.Abs(a.Y - b.Y) < 0.001;
+            => Math.Abs(a.X - b.X) < 0.001 && Math.Abs(a.Y - b.Y) < 0.001 && Math.Abs(a.Z - b.Z) < 0.001;
 
         private static string FormatPoint(CadDocumentService.CadPointData point)
             => string.Format(CultureInfo.InvariantCulture, "{0:0.###}, {1:0.###}", point.X, point.Y);
