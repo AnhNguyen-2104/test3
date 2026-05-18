@@ -174,6 +174,10 @@ namespace DACDT_2026
                         await HandleSendCadXAsync();
                         break;
 
+                    case "clearBuffer":
+                        await HandleClearBufferAsync();
+                        break;
+
                     // ── Log ─────────────────────────────────────────────────────
                     case "clearLogs":
                         await HandleClearLogsAsync();
@@ -182,7 +186,9 @@ namespace DACDT_2026
             }
             catch (System.Exception ex)
             {
-                await NotifyAsync("error", "UI bridge", ex.Message);
+                // Không để exception thoát ra ngoài async void — sẽ crash app
+                System.Diagnostics.Debug.WriteLine("MessageHandler error: " + ex);
+                try { await NotifyAsync("error", "UI bridge", ex.Message); } catch { }
             }
         }
     }

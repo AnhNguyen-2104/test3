@@ -19,6 +19,75 @@ const dom = {};
 let modalSubmit = null;
 let cadPanX = 0, cadPanY = 0, cadZoom = 1, isCadPanning = false, startCadPanX = 0, startCadPanY = 0;
 
+// Global function to update G-code line numbers
+function updateGcodeLineNumbers() {
+  const gcodeTa = document.getElementById("gcode-textarea");
+  const gcodeLineNumbers = document.getElementById("gcode-line-numbers");
+  if (!gcodeTa || !gcodeLineNumbers) return;
+  const lines = gcodeTa.value.split('\n');
+  const lineCount = lines.length;
+  let html = '';
+  for (let i = 1; i <= lineCount; i++) {
+    html += i + '\n';
+  }
+  gcodeLineNumbers.textContent = html;
+}
+
+// Global function to highlight active G-code line
+let lastHighlightedLine = -1;
+function highlightGcodeLine(lineNumber) {
+  const gcodeTa = document.getElementById("gcode-textarea");
+  const gcodeLineNumbers = document.getElementById("gcode-line-numbers");
+  
+  if (!gcodeTa || !gcodeLineNumbers) return;
+  if (lineNumber === lastHighlightedLine) return; // No change
+  
+  lastHighlightedLine = lineNumber;
+  
+  // Remove previous highlight
+  gcodeTa.classList.remove('gcode-line-active');
+  gcodeLineNumbers.classList.remove('gcode-line-number-active');
+  
+  if (lineNumber <= 0) return; // No active line
+  
+  const lines = gcodeTa.value.split('\n');
+  if (lineNumber > lines.length) return; // Invalid line number
+  
+  // Scroll to line (line numbers are 1-indexed)
+  const lineHeight = 18; // 12px font-size * 1.5 line-height
+  const scrollTop = (lineNumber - 1) * lineHeight;
+  const viewportHeight = gcodeTa.clientHeight;
+  const centerOffset = viewportHeight / 2 - lineHeight;
+  
+  gcodeTa.scrollTop = Math.max(0, scrollTop - centerOffset);
+  gcodeLineNumbers.scrollTop = gcodeTa.scrollTop;
+  
+  // Highlight line number (visual feedback only - can't highlight specific line in textarea)
+  // We'll use a different approach: wrap line numbers in spans
+  updateGcodeLineNumbersWithHighlight(lineNumber);
+}
+
+// Update line numbers with highlight support
+function updateGcodeLineNumbersWithHighlight(activeLine) {
+  const gcodeTa = document.getElementById("gcode-textarea");
+  const gcodeLineNumbers = document.getElementById("gcode-line-numbers");
+  if (!gcodeTa || !gcodeLineNumbers) return;
+  
+  const lines = gcodeTa.value.split('\n');
+  const lineCount = lines.length;
+  let html = '';
+  
+  for (let i = 1; i <= lineCount; i++) {
+    if (i === activeLine) {
+      html += `<span class="gcode-line-number-active">${i}</span>\n`;
+    } else {
+      html += i + '\n';
+    }
+  }
+  
+  gcodeLineNumbers.innerHTML = html;
+}
+
 window.app = { receive(m) { handleHostMessage(m || {}); } };
 if (host) {
   host.addEventListener('message', e => {
@@ -139,6 +208,15 @@ function bindEvents() {
   dom.openDxf.addEventListener("click", () => post("openDxf"));
   const saveGcodeBtn = document.getElementById("save-gcode-btn");
   const gcodeTa = document.getElementById("gcode-textarea");
+  const gcodeLineNumbers = document.getElementById("gcode-line-numbers");
+  
+  // Sync scroll between line numbers and textarea
+  if (gcodeTa && gcodeLineNumbers) {
+    gcodeTa.addEventListener('scroll', () => {
+      gcodeLineNumbers.scrollTop = gcodeTa.scrollTop;
+    });
+  }
+  
   let gcodeTimeout;
   if (saveGcodeBtn && gcodeTa) {
     saveGcodeBtn.addEventListener("click", () => {
@@ -152,6 +230,8 @@ function bindEvents() {
         this.value = upper;
         this.setSelectionRange(start, end);
       }
+      // Update line numbers on input
+      updateGcodeLineNumbers();
       clearTimeout(gcodeTimeout);
       gcodeTimeout = setTimeout(() => {
         post("previewGcode", { text: this.value });
@@ -247,11 +327,24 @@ function bindEvents() {
   });
   const importBtn = document.getElementById("import-cad-to-process-button");
   if (importBtn) importBtn.addEventListener("click", () => post("importCadToProcess"));
+  
   const sendBtn = document.getElementById("send-cad-x-button");
   if (sendBtn) sendBtn.addEventListener("click", () => {
     if (!state.control || !state.control.connection || !state.control.connection.connected) { showToast("error", "Telemetry", "Chưa kết nối PLC."); return; }
     post("sendCadX");
   });
+  
+  const clearBufferBtn = document.getElementById("clear-buffer-button");
+  if (clearBufferBtn) clearBufferBtn.addEventListener("click", () => {
+    if (!state.control || !state.control.connection || !state.control.connection.connected) { 
+      showToast("error", "Clear Buffer", "Chưa kết nối PLC."); 
+      return; 
+    }
+    if (confirm("Xóa toàn bộ buffer PLC (G2000+, G8000+, G14000+)?\n\nThao tác này sẽ xóa tất cả dữ liệu đã gửi xuống PLC.")) {
+      post("clearBuffer");
+    }
+  });
+  
   if (dom.applyOffsetBtn) {
     dom.applyOffsetBtn.addEventListener("click", () => {
       const x = parseFloat(dom.offsetXInput ? dom.offsetXInput.value : 0) || 0;
@@ -409,6 +502,17 @@ function renderControl() {
   }
   renderEvents();
   updateNavState();
+  
+  // Highlight active G-code line (from Axis 1 Current Data No.)
+  if (state.dxf && state.dxf.fileKind === "GCODE") {
+    const axis1 = axes[0]; // Axis 1 (master axis)
+    if (axis1 && axis1.currentDataNo && axis1.currentDataNo !== "--") {
+      const lineNumber = parseInt(axis1.currentDataNo, 10);
+      if (!isNaN(lineNumber) && lineNumber > 0) {
+        highlightGcodeLine(lineNumber);
+      }
+    }
+  }
 }
 
 function renderEvents() {
@@ -473,6 +577,8 @@ function renderDxf() {
     if (gcodeTextarea && gcodeTextarea._lastRaw !== state.dxf.rawText) {
       if (document.activeElement !== gcodeTextarea) {
         gcodeTextarea.value = state.dxf.rawText || "";
+        // Update line numbers when G-code is loaded
+        updateGcodeLineNumbers();
       }
       gcodeTextarea._lastRaw = state.dxf.rawText;
     }

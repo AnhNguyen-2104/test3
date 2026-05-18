@@ -126,9 +126,14 @@ namespace DACDT_2026
                 da2 = 0x0A;                                                                  // ABS_Linear2 (2-axis interpolation)
 
             // ── Da.5 Partner axis (b3–b2), Da.3 Acc (b5–b4), Da.4 Dec (b7–b6) ──
-            // Với 3-axis interpolation (Linear3/Rapid3): Da.5 không cần thiết → = 0
+            // Da.5 = 0 khi:
+            //   - 3-axis interpolation (Linear3/Rapid3): không cần partner axis
+            //   - Continuous Positioning (Da.1=01): dừng tại điểm, không nội suy
+            //   - End (Da.1=00): kết thúc, không nội suy
+            // Da.5 = partnerAxis chỉ khi Continuous Path (Da.1=11) với 2-axis
             bool is3Axis = s.Contains("linear3") || s.Contains("3-axis") || s.Contains("rapid3");
-            int da5 = is3Axis ? 0 : (partnerAxis & 0x03);
+            bool needsPartner = !is3Axis && da1 == 0x03; // chỉ Continuous Path 2-axis mới cần partner
+            int da5 = needsPartner ? (partnerAxis & 0x03) : 0;
             int da3 = accelTimeNo & 0x03;
             int da4 = decelTimeNo & 0x03;
 
@@ -843,6 +848,135 @@ namespace DACDT_2026
             }
 
             result.RowCount = rows.Count;
+            return result;
+        }
+
+        /// <summary>
+        /// Xóa toàn bộ buffer PLC (ghi tất cả về 0) trước khi gửi dữ liệu mới.
+        /// Xóa buffer cho tất cả các trục: Axis 1 (G2000+), Axis 2 (G8000+), Axis 3 (G14000+).
+        /// </summary>
+        /// <param name="plcComm">Connected PLCCommunication instance.</param>
+        /// <param name="maxPoints">Số điểm tối đa cần xóa (mặc định 600 điểm = 6000 words).</param>
+        /// <returns>SendResult với kết quả xóa buffer.</returns>
+        public static SendResult ClearAllBuffers(PLCCommunication plcComm, int maxPoints = 600)
+        {
+            var result = new SendResult { Success = true };
+
+            if (plcComm == null || !plcComm.IsConnected)
+            {
+                result.Success = false;
+                result.ErrorMessage = "PLC is not connected.";
+                return result;
+            }
+
+            int totalWords = maxPoints * Stride; // 600 points × 10 words = 6000 words
+            short[] zeroData = new short[totalWords]; // Mảng zero-init
+
+            try
+            {
+                // Xóa Axis 1 (X) buffer — G2000+
+                int axis1Base = ProgramBaseG[0]; // 2000
+                int res1 = plcComm.WriteBuffer(0, axis1Base, zeroData);
+                if (res1 != 0)
+                {
+                    result.WriteResults.Add(new WriteResult
+                    {
+                        Address = $"U0\\G{axis1Base}",
+                        Value = "Clear buffer",
+                        Status = $"Error({res1})",
+                        Message = "Failed to clear Axis 1 (X) buffer"
+                    });
+                    result.Success = false;
+                }
+                else
+                {
+                    result.WriteResults.Add(new WriteResult
+                    {
+                        Address = $"U0\\G{axis1Base} to U0\\G{axis1Base + totalWords - 1}",
+                        Value = $"Cleared {maxPoints} points",
+                        Status = "OK",
+                        Message = "Axis 1 (X) buffer cleared"
+                    });
+                }
+
+                // Xóa Axis 2 (Y) buffer — G8000+
+                int axis2Base = ProgramBaseG[1]; // 8000
+                int res2 = plcComm.WriteBuffer(0, axis2Base, zeroData);
+                if (res2 != 0)
+                {
+                    result.WriteResults.Add(new WriteResult
+                    {
+                        Address = $"U0\\G{axis2Base}",
+                        Value = "Clear buffer",
+                        Status = $"Error({res2})",
+                        Message = "Failed to clear Axis 2 (Y) buffer"
+                    });
+                    result.Success = false;
+                }
+                else
+                {
+                    result.WriteResults.Add(new WriteResult
+                    {
+                        Address = $"U0\\G{axis2Base} to U0\\G{axis2Base + totalWords - 1}",
+                        Value = $"Cleared {maxPoints} points",
+                        Status = "OK",
+                        Message = "Axis 2 (Y) buffer cleared"
+                    });
+                }
+
+                // Xóa Axis 3 (Z) buffer — G14000+
+                int axis3Base = ProgramBaseG[2]; // 14000
+                int res3 = plcComm.WriteBuffer(0, axis3Base, zeroData);
+                if (res3 != 0)
+                {
+                    result.WriteResults.Add(new WriteResult
+                    {
+                        Address = $"U0\\G{axis3Base}",
+                        Value = "Clear buffer",
+                        Status = $"Error({res3})",
+                        Message = "Failed to clear Axis 3 (Z) buffer"
+                    });
+                    result.Success = false;
+                }
+                else
+                {
+                    result.WriteResults.Add(new WriteResult
+                    {
+                        Address = $"U0\\G{axis3Base} to U0\\G{axis3Base + totalWords - 1}",
+                        Value = $"Cleared {maxPoints} points",
+                        Status = "OK",
+                        Message = "Axis 3 (Z) buffer cleared"
+                    });
+                }
+
+                // Xóa Start No. về 0 cho tất cả các trục
+                for (int axisIdx = 0; axisIdx < 3; axisIdx++)
+                {
+                    string startDevice = $"U0\\G{ControlBaseG[axisIdx]}";
+                    string used;
+                    int rStart = plcComm.WriteInt16ToDevicePath(startDevice, 0, out used);
+                    result.WriteResults.Add(new WriteResult
+                    {
+                        Address = startDevice,
+                        Value = "0",
+                        Status = rStart == 0 ? "OK" : $"Error({rStart})",
+                        Message = $"Clear Start No. Axis {axisIdx + 1}"
+                    });
+                }
+            }
+            catch (Exception ex)
+            {
+                result.Success = false;
+                result.ErrorMessage = ex.Message;
+                result.WriteResults.Add(new WriteResult
+                {
+                    Address = "ClearAllBuffers",
+                    Value = "",
+                    Status = "Error",
+                    Message = ex.Message
+                });
+            }
+
             return result;
         }
 

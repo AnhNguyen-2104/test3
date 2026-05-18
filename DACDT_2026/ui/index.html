@@ -248,6 +248,7 @@
           </div>
           <!-- Send to PLC -->
           <div style="display:flex;align-items:center;gap:6px;">
+            <button id="clear-buffer-button" class="primary-button compact" style="background:#ef4444; font-size: 13px; padding: 0 16px;" title="Xóa toàn bộ buffer PLC (G2000+, G8000+, G14000+)">Clear Buffer</button>
             <button id="send-cad-x-button" class="primary-button compact" style="background:linear-gradient(135deg, #10b981, #059669); font-size: 13px; padding: 0 16px;">Send CAD to PLC</button>
             <span id="send-row-count" style="font-size:11px;color:var(--muted);white-space:nowrap;display:none;"></span>
           </div>
@@ -298,7 +299,11 @@
                 <span style="font-size:13px; font-weight:600; color:var(--muted)">G-code Editor</span>
                 <button id="save-gcode-btn" class="primary-button" style="padding:4px 12px; height:auto;">Save G-code</button>
               </div>
-              <textarea id="gcode-textarea" spellcheck="false" style="flex:1; width:100%; resize:none; background:var(--bg-panel); color:var(--text-main); border:1px solid var(--border); padding:8px; font-family:monospace; font-size:12px; border-radius:6px; outline:none;"></textarea>
+              <!-- Editor with line numbers -->
+              <div style="flex:1; display:flex; border:1px solid var(--border); border-radius:6px; overflow:hidden; background:var(--bg-panel);">
+                <div id="gcode-line-numbers" style="padding:8px 8px 8px 12px; background:rgba(0,0,0,0.2); color:var(--muted); font-family:monospace; font-size:12px; line-height:1.5; text-align:right; user-select:none; overflow:hidden; min-width:45px; border-right:1px solid var(--border); white-space:pre;"></div>
+                <textarea id="gcode-textarea" spellcheck="false" style="flex:1; resize:none; background:transparent; color:var(--text-main); border:none; padding:8px; font-family:monospace; font-size:12px; line-height:1.5; outline:none; overflow-y:auto;"></textarea>
+              </div>
             </div>
           </div>
 

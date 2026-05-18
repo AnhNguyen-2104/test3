@@ -21,20 +21,13 @@ namespace DACDT_2026
     public partial class Form1
     {
         // ── Open DXF ────────────────────────────────────────────────────────────
-        private async Task HandleOpenDxfAsync()
+
+        /// <summary>
+        /// Hiển thị OpenFileDialog đồng bộ trên UI thread.
+        /// Phải được gọi từ UI thread — không dùng async/await bên trong.
+        /// </summary>
+        private string ShowOpenFileDialog()
         {
-            // ShowDialog phải chạy trên UI thread
-            // CoreWebView2_WebMessageReceived đã chạy trên UI thread nên không cần Invoke
-            // Nhưng nếu vì lý do nào đó bị gọi từ thread khác thì dùng BeginInvoke
-            if (this.InvokeRequired)
-            {
-                this.BeginInvoke(new Action(async () => await HandleOpenDxfAsync()));
-                return;
-            }
-
-            string selectedPath = null;
-            string initialDir   = activeCadDocument?.DirectoryPath;
-
             using (var dialog = new OpenFileDialog())
             {
                 dialog.Filter           = "CAD / G-code files (*.dxf;*.gcode;*.g;*.gc;*.nc;*.ngc;*.cnc;*.tap)|*.dxf;*.gcode;*.g;*.gc;*.nc;*.ngc;*.cnc;*.tap|DXF files (*.dxf)|*.dxf|G-code files (*.gcode;*.g;*.gc;*.nc;*.ngc;*.cnc;*.tap)|*.gcode;*.g;*.gc;*.nc;*.ngc;*.cnc;*.tap|All files (*.*)|*.*";
@@ -44,11 +37,44 @@ namespace DACDT_2026
                 dialog.RestoreDirectory = true;
                 dialog.FileName         = string.Empty;
 
+                string initialDir = activeCadDocument?.DirectoryPath;
                 if (!string.IsNullOrWhiteSpace(initialDir) && Directory.Exists(initialDir))
                     dialog.InitialDirectory = initialDir;
 
-                if (dialog.ShowDialog(this) == DialogResult.OK)
-                    selectedPath = Path.GetFullPath(dialog.FileName);
+                return dialog.ShowDialog(this) == DialogResult.OK
+                    ? Path.GetFullPath(dialog.FileName)
+                    : null;
+            }
+        }
+
+        private async Task HandleOpenDxfAsync()
+        {
+            // Dialog phải chạy trên UI thread — gọi ShowOpenFileDialog() trực tiếp
+            // vì CoreWebView2_WebMessageReceived đã chạy trên UI thread.
+            // Nếu vì lý do nào đó không ở UI thread, marshal về UI thread trước.
+            string selectedPath = null;
+            try
+            {
+                if (this.InvokeRequired)
+                {
+                    // Marshal về UI thread và chờ kết quả
+                    var tcs = new System.Threading.Tasks.TaskCompletionSource<string>();
+                    this.BeginInvoke(new Action(() =>
+                    {
+                        try { tcs.SetResult(ShowOpenFileDialog()); }
+                        catch (Exception ex) { tcs.SetException(ex); }
+                    }));
+                    selectedPath = await tcs.Task;
+                }
+                else
+                {
+                    selectedPath = ShowOpenFileDialog();
+                }
+            }
+            catch (Exception ex)
+            {
+                await NotifyAsync("error", "DXF/G-code", "Lỗi mở dialog: " + ex.Message);
+                return;
             }
 
             if (string.IsNullOrEmpty(selectedPath)) return;
@@ -80,7 +106,7 @@ namespace DACDT_2026
                     // Kết nối các đoạn thành path liên tục (O(n²)) — chạy nền
                     if (loadedDoc?.Primitives != null && loadedDoc.Primitives.Count > 0)
                     {
-                        var paths = GetConnectedPathsFromCad(loadedDoc.Primitives);
+                        var paths = GetConnectedPathsFromCad(loadedDoc.Primitives, isGcode);
                         loadedDoc.Primitives.Clear();
                         foreach (var path in paths)
                             loadedDoc.Primitives.AddRange(path);
@@ -146,7 +172,7 @@ namespace DACDT_2026
 
                     if (previewDoc?.Primitives != null && previewDoc.Primitives.Count > 0)
                     {
-                        var paths = GetConnectedPathsFromCad(previewDoc.Primitives);
+                        var paths = GetConnectedPathsFromCad(previewDoc.Primitives, isGcode: true);
                         previewDoc.Primitives.Clear();
                         foreach (var pathList in paths)
                             previewDoc.Primitives.AddRange(pathList);
@@ -497,6 +523,28 @@ namespace DACDT_2026
             {
                 _ = SendProgressAsync(true, 0);
 
+                // ── BƯỚC 0: Xóa toàn bộ buffer về 0 trước khi ghi dữ liệu mới ──────────
+                await LogUIAsync("PLC", "Đang xóa buffer cũ...");
+                var clearTask = Task.Run(() => QD75BufferWriter.ClearAllBuffers(plcComm, maxPoints: 600));
+                var clearResult = await clearTask;
+
+                foreach (var wr in clearResult.WriteResults)
+                {
+                    AddLogEntry(wr.Address, wr.Value, "Clear", wr.Status, wr.Message);
+                    if (!wr.Status.StartsWith("OK"))
+                        await NotifyAsync("warning", "Clear Buffer", $"{wr.Address}: {wr.Message}");
+                }
+
+                if (!clearResult.Success)
+                {
+                    await NotifyAsync("error", "Clear Buffer", "Không thể xóa buffer cũ. Tiếp tục ghi dữ liệu mới...");
+                    // Không return — vẫn tiếp tục ghi dữ liệu mới
+                }
+                else
+                {
+                    await LogUIAsync("PLC", "Đã xóa buffer cũ thành công.");
+                }
+
                 // ── BƯỚC 1: Master axis (Axis 1 / X): bulk write toàn bộ buffer G2000+ ──
                 // Chạy animation 0→45% song song với bulk write để progress bar mượt
                 var axisXTask = Task.Run(() =>
@@ -558,6 +606,55 @@ namespace DACDT_2026
             }
         }
 
+        // ── Clear PLC Buffer ──────────────────────────────────────────────────────
+        private async Task HandleClearBufferAsync()
+        {
+            if (plcComm == null || !plcComm.IsConnected)
+            {
+                await NotifyAsync("error", "Clear Buffer", "PLC is not connected.");
+                return;
+            }
+
+            // Tạm dừng poll timer
+            plcPollTimer.Stop();
+
+            try
+            {
+                await LogUIAsync("Clear Buffer", "Đang xóa toàn bộ buffer PLC...");
+
+                var clearTask = Task.Run(() => QD75BufferWriter.ClearAllBuffers(plcComm, maxPoints: 600));
+                var clearResult = await clearTask;
+
+                foreach (var wr in clearResult.WriteResults)
+                {
+                    AddLogEntry(wr.Address, wr.Value, "Clear", wr.Status, wr.Message);
+                    if (!wr.Status.StartsWith("OK"))
+                        await NotifyAsync("warning", "Clear Buffer", $"{wr.Address}: {wr.Message}");
+                }
+
+                if (clearResult.Success)
+                {
+                    await NotifyAsync("success", "Clear Buffer", 
+                        "Đã xóa toàn bộ buffer PLC (Axis 1, 2, 3). Tất cả dữ liệu cũ đã bị xóa.");
+                }
+                else
+                {
+                    await NotifyAsync("error", "Clear Buffer", 
+                        "Không thể xóa hoàn toàn buffer. Kiểm tra log để biết chi tiết.");
+                }
+            }
+            catch (Exception ex)
+            {
+                await NotifyAsync("error", "Clear Buffer", $"Lỗi: {ex.Message}");
+            }
+            finally
+            {
+                _ = SendProgressAsync(false, 0);
+                if (plcComm != null && plcComm.IsConnected && !isClosing)
+                    plcPollTimer.Start();
+            }
+        }
+
         /// <summary>
         /// Animate progress bar từ <paramref name="from"/> đến <paramref name="to"/> trong
         /// <paramref name="durationMs"/> ms, nhưng dừng sớm nếu <paramref name="completionTask"/>
@@ -587,21 +684,229 @@ namespace DACDT_2026
         // ── Build ProcessRow list from connected CAD paths ───────────────────────
         private List<ProcessRow> BuildConnectedPathsFromCad()
         {
+            bool isGcodeDocument = string.Equals(activeDocumentKind, "GCODE", StringComparison.OrdinalIgnoreCase);
+            
+            if (isGcodeDocument)
+                return BuildGcodeProcessRows();
+            else
+                return BuildDxfProcessRows();
+        }
+
+        // ── Build ProcessRow list for DXF files ──────────────────────────────────
+        /// <summary>
+        /// Build process rows cho file DXF.
+        /// Logic giống GCODE:
+        ///   - Không dùng MCode
+        ///   - Continuous Positioning: điểm cuối path (trước nhảy sang path mới) — dừng có giảm tốc
+        ///   - Continuous Path: điểm giữa path — chạy không dừng
+        ///   - End: điểm cuối cùng
+        ///   - Z: dùng globalZDown/globalZSafe
+        ///   - Khi có Z: dùng Linear3 (3-axis), không có Z: dùng Line (2-axis)
+        /// </summary>
+        private List<ProcessRow> BuildDxfProcessRows()
+        {
+            var result = new List<ProcessRow>();
+            if (activeCadDocument?.Primitives == null) return result;
+
+            // Parse globalZDown và globalZSafe
+            double zDown = 0.0;
+            double zSafe = 0.0;
+            double.TryParse(globalZDown, NumberStyles.Float, CultureInfo.InvariantCulture, out zDown);
+            double.TryParse(globalZSafe, NumberStyles.Float, CultureInfo.InvariantCulture, out zSafe);
+
+            bool hasZ = Math.Abs(zDown) > 1e-9 || Math.Abs(zSafe) > 1e-9;
+
+            var paths = GetConnectedPathsFromCad(activeCadDocument.Primitives, isGcode: false);
+
+            for (int pathIdx = 0; pathIdx < paths.Count; pathIdx++)
+            {
+                var path = paths[pathIdx];
+                bool isLastPath = (pathIdx == paths.Count - 1);
+                bool isFirstPath = (pathIdx == 0);
+
+                for (int pIdx = 0; pIdx < path.Count; pIdx++)
+                {
+                    var prim = path[pIdx];
+                    if (prim.Points == null || prim.Points.Count < 2) continue;
+
+                    bool isLastInPath = (pIdx == path.Count - 1);
+                    bool isFirstInPath = (pIdx == 0);
+
+                    // suffix cho điểm cuối của primitive này trong path:
+                    //   - Điểm cuối của path cuối cùng      → (End)                   [Da.1 = 00]
+                    //   - Điểm cuối của path trung gian      → (Continuous Positioning) [Da.1 = 01] dừng có tăng/giảm tốc trước khi nhảy sang path kế
+                    //   - Điểm giữa trong cùng một path      → (Continuous Path)        [Da.1 = 11] chạy không dừng
+                    string suffix = isLastInPath
+                        ? (isLastPath ? " (End)" : " (Continuous Positioning)")
+                        : " (Continuous Path)";
+
+                    // Điểm đầu tiên của path: di chuyển đến điểm start
+                    // - Path đầu tiên và chỉ có 1 path: Continuous Path (không cần dừng)
+                    // - Path có đoạn đứt quãng: Continuous Positioning (dừng có giảm tốc)
+                    if (isFirstInPath)
+                    {
+                        var startPt = prim.Points.First();
+                        bool onlyPath = (paths.Count == 1);
+                        
+                        string startSuffix = (isFirstPath && onlyPath)
+                            ? " (Continuous Path)"
+                            : " (Continuous Positioning)";
+                        
+                        // Nếu có Z thì dùng Linear3, không thì dùng Line
+                        string motionType = hasZ ? ("Linear3" + startSuffix) : ("Line" + startSuffix);
+                        
+                        // Z: điểm đầu path → zSafe (an toàn) hoặc zDown nếu là path đầu tiên
+                        double startZ = (isFirstPath && onlyPath) ? zDown : zSafe;
+                        
+                        var startRow = new ProcessRow
+                        {
+                            MotionType       = motionType,
+                            EndCoordinate    = string.Format(CultureInfo.InvariantCulture,
+                                "{0:0.###};{1:0.###}", startPt.X, startPt.Y),
+                            CenterCoordinate = string.Empty,
+                            MCodeValue       = string.Empty, // Không dùng MCode
+                            EndZ             = startZ
+                        };
+                        ApplyPrimitiveExtraData(startRow, prim, isGcode: false);
+                        result.Add(startRow);
+                    }
+
+                    // Xử lý Line/Polyline
+                    if (prim.SourceType.Contains("Line") || prim.SourceType.Contains("Polyline"))
+                    {
+                        for (int i = 1; i < prim.Points.Count; i++)
+                        {
+                            bool isLastInPrim = (i == prim.Points.Count - 1);
+                            string currentSuffix = (isLastInPrim && isLastInPath) ? suffix : " (Continuous Path)";
+                            var pt = prim.Points[i];
+
+                            // Xác định Z:
+                            //   - Điểm cuối path (trước khi nhảy sang path mới): Z = zSafe (nhấc lên)
+                            //   - Điểm cuối path cuối cùng: Z = zDown (kết thúc ở độ sâu gia công)
+                            //   - Điểm giữa path: Z = zDown (đang gia công)
+                            double endZ;
+                            if (isLastInPrim && isLastInPath && !isLastPath)
+                                endZ = zSafe; // Nhấc lên trước khi nhảy sang path mới
+                            else
+                                endZ = zDown; // Gia công hoặc kết thúc
+
+                            // Nếu có Z thì dùng Linear3, không thì dùng Line
+                            string motionPrefix = hasZ ? "Linear3" : "Line";
+
+                            var row = new ProcessRow
+                            {
+                                MotionType       = motionPrefix + currentSuffix,
+                                EndCoordinate    = string.Format(CultureInfo.InvariantCulture,
+                                    "{0:0.###};{1:0.###}", pt.X, pt.Y),
+                                CenterCoordinate = string.Empty,
+                                MCodeValue       = string.Empty, // Không dùng MCode
+                                EndZ             = endZ
+                            };
+                            ApplyPrimitiveExtraData(row, prim, isGcode: false);
+                            result.Add(row);
+                        }
+                    }
+                    // Xử lý Arc/Circle
+                    else if (prim.SourceType.Contains("Arc") || prim.SourceType.Contains("Circle"))
+                    {
+                        string arcType = prim.IsCw ? "Arc CW" : "Arc CCW";
+                        if (prim.SourceType.Contains("Circle")) arcType = "Circle";
+
+                        var endPt = prim.Points.Last();
+                        
+                        // Xác định Z:
+                        //   - Điểm cuối path (trước khi nhảy sang path mới): Z = zSafe (nhấc lên)
+                        //   - Điểm cuối path cuối cùng: Z = zDown (kết thúc ở độ sâu gia công)
+                        //   - Điểm giữa path: Z = zDown (đang gia công)
+                        double endZ;
+                        if (isLastInPath && !isLastPath)
+                            endZ = zSafe; // Nhấc lên trước khi nhảy sang path mới
+                        else
+                            endZ = zDown; // Gia công hoặc kết thúc
+
+                        var row = new ProcessRow
+                        {
+                            MotionType    = arcType + suffix,
+                            EndCoordinate = string.Format(CultureInfo.InvariantCulture,
+                                "{0:0.###};{1:0.###}", endPt.X, endPt.Y),
+                            MCodeValue    = string.Empty, // Không dùng MCode
+                            EndZ          = endZ
+                        };
+                        if (prim.Center != null)
+                            row.CenterCoordinate = string.Format(CultureInfo.InvariantCulture,
+                                "{0:0.###};{1:0.###}", prim.Center.X, prim.Center.Y);
+                        ApplyPrimitiveExtraData(row, prim, isGcode: false);
+                        result.Add(row);
+                    }
+                }
+            }
+
+            // ── Post-process: đảm bảo Continuous Positioning đúng chỗ (GIỐNG GCODE) ──
+            // Quy tắc cho DXF:
+            //   1. Chuyển giữa 3-axis (Linear3) ↔ 2-axis (Line/Arc) → row trước phải là Continuous Positioning
+            //   2. Chuyển giữa Line ↔ Arc → row trước phải là Continuous Positioning (để PLC dừng, giảm tốc)
+            //   3. Row cuối path (trước nhảy sang path mới) đã được gán Continuous Positioning từ trước
+            //
+            // Logic này đảm bảo PLC dừng có giảm tốc tại các điểm chuyển đổi loại chuyển động,
+            // tránh giật cục hoặc sai궤 đạo khi chuyển từ đường thẳng sang cung tròn hoặc ngược lại.
+            for (int i = 0; i < result.Count; i++)
+            {
+                bool curr3Axis = result[i].MotionType.Contains("Linear3");
+                bool currIsLine = result[i].MotionType.Contains("Line") || result[i].MotionType.Contains("Linear3");
+                bool currIsArc = result[i].MotionType.Contains("Arc") || result[i].MotionType.Contains("Circle");
+
+                if (i < result.Count - 1)
+                {
+                    bool next3Axis = result[i + 1].MotionType.Contains("Linear3");
+                    bool nextIsLine = result[i + 1].MotionType.Contains("Line") || result[i + 1].MotionType.Contains("Linear3");
+                    bool nextIsArc = result[i + 1].MotionType.Contains("Arc") || result[i + 1].MotionType.Contains("Circle");
+
+                    bool mustStop = false;
+
+                    // Quy tắc 1: chuyển loại interpolation (2-axis ↔ 3-axis)
+                    if (curr3Axis != next3Axis) mustStop = true;
+
+                    // Quy tắc 2: chuyển giữa Line ↔ Arc (cả 2 chiều)
+                    if ((currIsLine && nextIsArc) || (currIsArc && nextIsLine)) mustStop = true;
+
+                    if (mustStop)
+                    {
+                        string mt = result[i].MotionType;
+                        if (mt.Contains("(Continuous Path)"))
+                            result[i].MotionType = mt.Replace("(Continuous Path)", "(Continuous Positioning)");
+                        // Nếu đã là End hoặc Continuous Positioning thì giữ nguyên
+                    }
+                }
+            }
+
+            return result;
+        }
+
+        // ── Build ProcessRow list for GCODE files ────────────────────────────────
+        /// <summary>
+        /// Build process rows cho file GCODE.
+        /// Logic phức tạp:
+        ///   - G0 Rapid: dùng rapidSpeed, Linear3 (3-axis), Continuous Positioning
+        ///   - G1 có Z: Linear3 (3-axis)
+        ///   - G1 không Z: Linear2 (2-axis)
+        ///   - Post-processing: đảm bảo Continuous Positioning đúng chỗ (trước/sau G0, chuyển 3↔2 axis)
+        /// </summary>
+        private List<ProcessRow> BuildGcodeProcessRows()
+        {
             var result = new List<ProcessRow>();
             if (activeCadDocument?.Primitives == null) return result;
 
             // Snapshot rapidSpeed để dùng trong background thread
             string snapRapidSpeed = rapidSpeed;
 
-            var paths = GetConnectedPathsFromCad(activeCadDocument.Primitives);
-            bool isGcodeDocument = string.Equals(activeDocumentKind, "GCODE", StringComparison.OrdinalIgnoreCase);
+            var paths = GetConnectedPathsFromCad(activeCadDocument.Primitives, isGcode: true);
 
             for (int pathIdx = 0; pathIdx < paths.Count; pathIdx++)
             {
                 var path        = paths[pathIdx];
                 bool isLastPath = (pathIdx == paths.Count - 1);
                 bool isFirstPath = (pathIdx == 0);
-                bool pathClosed = IsClosedPath(path);
+                bool pathClosed = IsClosedPath(path, isGcode: true);
 
                 for (int pIdx = 0; pIdx < path.Count; pIdx++)
                 {
@@ -632,17 +937,32 @@ namespace DACDT_2026
                     {
                         var startPt   = prim.Points.First();
                         bool onlyPath = (paths.Count == 1);
-                        double startZ = isGcodeDocument ? startPt.Z : 0.0;
+                        double startZ = startPt.Z;
 
                         // G0 Rapid luôn dùng "Rapid3" → Linear3 (Da.2=0x15), tốc độ rapidSpeed
-                        bool startIsRapid = isGcodeDocument &&
-                            (prim.SourceType.Contains("G0") || prim.SourceType.Contains("Rapid"));
+                        bool startIsRapid = prim.SourceType.Contains("G0") || prim.SourceType.Contains("Rapid");
 
-                        string startMotion = startIsRapid
-                            ? "Rapid3 (Continuous Positioning)"
-                            : ((isFirstPath && onlyPath)
-                                ? "Line (Continuous Path)"
-                                : "Line (Continuous Positioning)");
+                        // Xác định motion prefix cho start point:
+                        // - G0: luôn "Rapid3" (3-axis)
+                        // - G1 có Z: "Linear3" (3-axis)
+                        // - G1 không Z: "Line" (2-axis)
+                        string startPrefix;
+                        if (startIsRapid)
+                        {
+                            startPrefix = "Rapid3";
+                        }
+                        else
+                        {
+                            bool hasZ = Math.Abs(startZ) > 1e-9;
+                            startPrefix = hasZ ? "Linear3" : "Line";
+                        }
+
+                        // Xác định suffix (Continuous Path hoặc Continuous Positioning)
+                        string startSuffix = (isFirstPath && onlyPath)
+                            ? " (Continuous Path)"
+                            : " (Continuous Positioning)";
+
+                        string startMotion = startPrefix + startSuffix;
 
                         var startRow = new ProcessRow
                         {
@@ -650,10 +970,10 @@ namespace DACDT_2026
                             EndCoordinate    = string.Format(CultureInfo.InvariantCulture,
                                 "{0:0.###};{1:0.###}", startPt.X, startPt.Y),
                             CenterCoordinate = string.Empty,
-                            MCodeValue       = (!isGcodeDocument && pathClosed) ? "1" : string.Empty,
+                            MCodeValue       = string.Empty, // GCODE không dùng MCode từ DXF logic
                             EndZ             = startZ
                         };
-                        ApplyPrimitiveExtraData(startRow, prim, isGcodeDocument);
+                        ApplyPrimitiveExtraData(startRow, prim, isGcode: true);
                         if (startIsRapid && !string.IsNullOrEmpty(snapRapidSpeed))
                             startRow.Speed = snapRapidSpeed;
                         result.Add(startRow);
@@ -661,18 +981,30 @@ namespace DACDT_2026
 
                     if (prim.SourceType.Contains("Line") || prim.SourceType.Contains("Polyline"))
                     {
-                        bool primIsRapid = isGcodeDocument &&
-                            (prim.SourceType.Contains("G0") || prim.SourceType.Contains("Rapid"));
+                        bool primIsRapid = prim.SourceType.Contains("G0") || prim.SourceType.Contains("Rapid");
 
                         for (int i = 1; i < prim.Points.Count; i++)
                         {
                             bool   isLastInPrim  = (i == prim.Points.Count - 1);
                             string currentSuffix = (isLastInPrim && isLastInPath) ? suffix : " (Continuous Path)";
                             var    pt            = prim.Points[i];
-                            double endZ          = isGcodeDocument ? pt.Z : 0.0;
+                            double endZ          = pt.Z;
 
-                            // G0 Rapid: prefix "Rapid3" → Linear3 (Da.2=0x15)
-                            string motionPrefix = primIsRapid ? "Rapid3" : "Line";
+                            // Xác định motion type:
+                            // - G0 Rapid: luôn "Rapid3" (3-axis)
+                            // - G1 có Z ≠ 0: "Linear3" (3-axis)
+                            // - G1 không Z: "Line" (2-axis)
+                            string motionPrefix;
+                            if (primIsRapid)
+                            {
+                                motionPrefix = "Rapid3";
+                            }
+                            else
+                            {
+                                // G1: kiểm tra Z
+                                bool hasZ = Math.Abs(endZ) > 1e-9;
+                                motionPrefix = hasZ ? "Linear3" : "Line";
+                            }
 
                             var row = new ProcessRow
                             {
@@ -682,12 +1014,10 @@ namespace DACDT_2026
                                 CenterCoordinate = string.Empty,
                                 EndZ             = endZ
                             };
-                            ApplyPrimitiveExtraData(row, prim, isGcodeDocument);
+                            ApplyPrimitiveExtraData(row, prim, isGcode: true);
                             // G0: luôn dùng rapidSpeed, bỏ qua F từ file
                             if (primIsRapid && !string.IsNullOrEmpty(snapRapidSpeed))
                                 row.Speed = snapRapidSpeed;
-                            if (!isGcodeDocument && pathClosed && isLastInPath && isLastInPrim)
-                                row.MCodeValue = "2";
                             result.Add(row);
                         }
                     }
@@ -701,40 +1031,106 @@ namespace DACDT_2026
                         {
                             MotionType    = arcType + suffix,
                             EndCoordinate = string.Format(CultureInfo.InvariantCulture,
-                                "{0:0.###};{1:0.###}", endPt.X, endPt.Y)
+                                "{0:0.###};{1:0.###}", endPt.X, endPt.Y),
+                            EndZ          = endPt.Z
                         };
                         if (prim.Center != null)
                             row.CenterCoordinate = string.Format(CultureInfo.InvariantCulture,
                                 "{0:0.###};{1:0.###}", prim.Center.X, prim.Center.Y);
-                        ApplyPrimitiveExtraData(row, prim, isGcodeDocument);
-                        if (!isGcodeDocument && pathClosed && isLastInPath)
-                            row.MCodeValue = "2";
+                        ApplyPrimitiveExtraData(row, prim, isGcode: true);
                         result.Add(row);
                     }
                 }
             }
 
-            // ── Post-process: khi chuyển từ 2-axis sang 3-axis (hoặc ngược lại),
-            //    row trước đó phải dừng có giảm tốc (Continuous Positioning).
-            //    Không thể chạy Continuous Path qua ranh giới thay đổi loại interpolation.
-            if (isGcodeDocument)
+            // ── Post-process: đảm bảo mã lệnh chạy đúng ─────────────────────────────
+            // Quy tắc:
+            //   1. G00 (Rapid3) luôn là Continuous Positioning — không bao giờ Continuous Path
+            //   2. Row trước G00 phải là Continuous Positioning
+            //   3. Chuyển giữa 3-axis ↔ 2-axis → row trước phải là END (tránh lỗi 524)
+            //   4. Row sau G00 (G01/G02/G03) phải là Continuous Positioning
+            //   5. G01 có Z (Linear3) cũng phải Continuous Positioning — không Continuous Path
+            //   6. Row trước/sau Linear3 phải là END (tránh lỗi 524)
+            
+            // BƯỚC 1: Xử lý current row (quy tắc 1, 5)
+            for (int i = 0; i < result.Count; i++)
             {
-                for (int i = 0; i < result.Count - 1; i++)
-                {
-                    bool currIs3Axis = result[i].MotionType.Contains("Rapid3") || result[i].MotionType.Contains("Linear3");
-                    bool nextIs3Axis = result[i + 1].MotionType.Contains("Rapid3") || result[i + 1].MotionType.Contains("Linear3");
+                bool currIsRapid = result[i].MotionType.Contains("Rapid3");
+                bool currIsLinear3 = result[i].MotionType.Contains("Linear3");
 
-                    if (currIs3Axis != nextIs3Axis)
+                // Quy tắc 1: G00 luôn Continuous Positioning (không Continuous Path)
+                if (currIsRapid)
+                {
+                    result[i].MotionType = result[i].MotionType
+                        .Replace("(Continuous Path)", "(Continuous Positioning)");
+                }
+
+                // Quy tắc 5: G01 có Z (Linear3) cũng phải Continuous Positioning
+                if (currIsLinear3)
+                {
+                    result[i].MotionType = result[i].MotionType
+                        .Replace("(Continuous Path)", "(Continuous Positioning)");
+                }
+            }
+
+            // BƯỚC 2: Xử lý row trước/sau - chuyển 2↔3 axis phải dùng END (tránh lỗi 524)
+            for (int i = 0; i < result.Count; i++)
+            {
+                bool currIsRapid = result[i].MotionType.Contains("Rapid3");
+                bool currIsLinear3 = result[i].MotionType.Contains("Linear3");
+                bool curr3Axis   = currIsRapid || currIsLinear3;
+
+                if (i < result.Count - 1)
+                {
+                    bool nextIsRapid = result[i + 1].MotionType.Contains("Rapid3");
+                    bool nextIsLinear3 = result[i + 1].MotionType.Contains("Linear3");
+                    bool next3Axis   = nextIsRapid || nextIsLinear3;
+
+                    bool mustStop = false;
+                    bool mustEnd = false; // Phải dùng END thay vì Continuous Positioning
+
+                    // Quy tắc 2: row trước G00 phải dừng
+                    if (nextIsRapid) mustStop = true;
+
+                    // Quy tắc 3: chuyển loại interpolation (2-axis ↔ 3-axis) → phải END
+                    // Lý do: QD75 không cho phép thay đổi số trục trong Continuous Positioning/Path
+                    // → Lỗi 524: "Control system setting error"
+                    if (curr3Axis != next3Axis) {
+                        mustEnd = true;
+                        mustStop = false; // Ưu tiên END hơn Continuous Positioning
+                    }
+
+                    // Quy tắc 4: row sau G00 phải dừng (G00 → G01/G02/G03)
+                    if (currIsRapid && !nextIsRapid) mustStop = true;
+
+                    // Quy tắc 6: row trước Linear3 phải END (tránh lỗi 524)
+                    if (nextIsLinear3 && !curr3Axis) {
+                        mustEnd = true;
+                        mustStop = false;
+                    }
+
+                    // Quy tắc 6: row sau Linear3 phải END (tránh lỗi 524)
+                    if (currIsLinear3 && !next3Axis) {
+                        mustEnd = true;
+                        mustStop = false;
+                    }
+
+                    if (mustEnd)
                     {
-                        // Chuyển loại interpolation → row hiện tại phải dừng
+                        // Chuyển sang END (hoàn thành định vị)
+                        string mt = result[i].MotionType;
+                        if (mt.Contains("(Continuous Path)"))
+                            result[i].MotionType = mt.Replace("(Continuous Path)", " (End)");
+                        else if (mt.Contains("(Continuous Positioning)"))
+                            result[i].MotionType = mt.Replace("(Continuous Positioning)", " (End)");
+                    }
+                    else if (mustStop)
+                    {
+                        // Chuyển sang Continuous Positioning
                         string mt = result[i].MotionType;
                         if (mt.Contains("(Continuous Path)"))
                             result[i].MotionType = mt.Replace("(Continuous Path)", "(Continuous Positioning)");
-                        else if (mt.Contains("(End)"))
-                        {
-                            // Nếu là End thì giữ nguyên — đã dừng rồi
-                        }
-                        // Nếu chưa có suffix (ví dụ Rapid3 không có suffix) thì không cần đổi
+                        // Nếu đã là End hoặc Continuous Positioning thì giữ nguyên
                     }
                 }
             }
@@ -744,7 +1140,7 @@ namespace DACDT_2026
 
         // ── Connect CAD primitives into chains ───────────────────────────────────
         private List<List<CadDocumentService.CadPrimitiveData>> GetConnectedPathsFromCad(
-            List<CadDocumentService.CadPrimitiveData> primitives)
+            List<CadDocumentService.CadPrimitiveData> primitives, bool isGcode = false)
         {
             var unassigned = new List<CadDocumentService.CadPrimitiveData>(primitives);
             var paths      = new List<List<CadDocumentService.CadPrimitiveData>>();
@@ -777,21 +1173,21 @@ namespace DACDT_2026
                         var candStart = cand.Points.First();
                         var candEnd   = cand.Points.Last();
 
-                        if (AreClose(tailPt, candStart))
+                        if (AreClose(tailPt, candStart, isGcode))
                         {
                             currentPath.Add(cand); unassigned.RemoveAt(i); added = true; break;
                         }
-                        else if (AreClose(tailPt, candEnd))
+                        else if (AreClose(tailPt, candEnd, isGcode))
                         {
                             cand.Points.Reverse();
                             if (cand.SourceType.Contains("Arc")) cand.IsCw = !cand.IsCw;
                             currentPath.Add(cand); unassigned.RemoveAt(i); added = true; break;
                         }
-                        else if (AreClose(headPt, candEnd))
+                        else if (AreClose(headPt, candEnd, isGcode))
                         {
                             currentPath.Insert(0, cand); unassigned.RemoveAt(i); added = true; break;
                         }
-                        else if (AreClose(headPt, candStart))
+                        else if (AreClose(headPt, candStart, isGcode))
                         {
                             cand.Points.Reverse();
                             if (cand.SourceType.Contains("Arc")) cand.IsCw = !cand.IsCw;
@@ -806,7 +1202,7 @@ namespace DACDT_2026
             return paths;
         }
 
-        private bool IsClosedPath(List<CadDocumentService.CadPrimitiveData> path)
+        private bool IsClosedPath(List<CadDocumentService.CadPrimitiveData> path, bool isGcode = false)
         {
             if (path == null || path.Count == 0) return false;
 
@@ -814,7 +1210,7 @@ namespace DACDT_2026
             var last = path.LastOrDefault(p => p.Points != null && p.Points.Count > 0);
             if (first == null || last == null) return false;
 
-            return AreClose(first.Points.First(), last.Points.Last());
+            return AreClose(first.Points.First(), last.Points.Last(), isGcode);
         }
 
         private static void ApplyPrimitiveExtraData(ProcessRow row, CadDocumentService.CadPrimitiveData primitive, bool isGcode = false)
@@ -828,8 +1224,17 @@ namespace DACDT_2026
                 row.Dwell = primitive.Dwell;
         }
 
-        private bool AreClose(CadDocumentService.CadCoordinate a, CadDocumentService.CadCoordinate b)
-            => Math.Abs(a.X - b.X) < 0.001 && Math.Abs(a.Y - b.Y) < 0.001 && Math.Abs(a.Z - b.Z) < 0.001;
+        /// <summary>
+        /// So sánh 2 điểm có gần nhau không.
+        /// - DXF (isGcode=false): chỉ check X,Y (Z luôn = 0)
+        /// - GCODE (isGcode=true): check cả X,Y,Z
+        /// </summary>
+        private bool AreClose(CadDocumentService.CadCoordinate a, CadDocumentService.CadCoordinate b, bool isGcode = false)
+        {
+            bool xyClose = Math.Abs(a.X - b.X) < 0.001 && Math.Abs(a.Y - b.Y) < 0.001;
+            if (!isGcode) return xyClose;
+            return xyClose && Math.Abs(a.Z - b.Z) < 0.001;
+        }
 
         private static string FormatPoint(CadDocumentService.CadPointData point)
             => string.Format(CultureInfo.InvariantCulture, "{0:0.###}, {1:0.###}", point.X, point.Y);
