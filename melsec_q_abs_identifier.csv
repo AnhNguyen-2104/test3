@@ -1,0 +1,13 @@
+Loai,Da.2 Code (Hex),Da.2 Control System,Da.1 Value,Da.1 Operation Pattern,Da.5 (Partner Axis),Da.3 Acc No.,Da.4 Dec No.,Decimal,Hex,Binary
+Linear 2-axis,0x0A,ABS Linear 2,0,Positioning complete,Axis2,0,0,2564,0x0A04,0000101000000100
+Linear 2-axis,0x0A,ABS Linear 2,1,Continuous positioning,Axis2,0,0,2565,0x0A05,0000101000000101
+Linear 2-axis,0x0A,ABS Linear 2,3,Continuous path,Axis2,0,0,2567,0x0A07,0000101000000111
+Linear 3-axis,0x15,ABS Linear 3,0,Positioning complete,—,0,0,5380,0x1504,0001010100000100
+Linear 3-axis,0x15,ABS Linear 3,1,Continuous positioning,—,0,0,5381,0x1505,0001010100000101
+Linear 3-axis,0x15,ABS Linear 3,3,Continuous path,—,0,0,5383,0x1507,0001010100000111
+Circular CW,0x0F,ABS Circular CW (right),0,Positioning complete,Axis2,0,0,3844,0x0F04,0000111100000100
+Circular CW,0x0F,ABS Circular CW (right),1,Continuous positioning,Axis2,0,0,3845,0x0F05,0000111100000101
+Circular CW,0x0F,ABS Circular CW (right),3,Continuous path,Axis2,0,0,3847,0x0F07,0000111100000111
+Circular CCW,0x10,ABS Circular CCW (left),0,Positioning complete,Axis2,0,0,4100,0x1004,0001000000000100
+Circular CCW,0x10,ABS Circular CCW (left),1,Continuous positioning,Axis2,0,0,4101,0x1005,0001000000000101
+Circular CCW,0x10,ABS Circular CCW (left),3,Continuous path,Axis2,0,0,4103,0x1007,0001000000000111

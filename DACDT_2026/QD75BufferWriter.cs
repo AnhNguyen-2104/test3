@@ -236,12 +236,10 @@ namespace DACDT_2026
             ParseMotionType(motionType, out OperationPattern da1, out ControlSystem da2);
 
             // Da.5 quy tắc:
-            //   - Linear3 (3-axis tuyến tính): module tự xác định 3 trục → Da.5 = 0
+            //   - Linear3 (3-axis tuyến tính): Da.5 = Axis2 (partner axis mặc định)
             //   - Helical (3-axis cung tròn): Da.5 = trục nội suy cung tròn
             //   - 2-axis (Linear2/Circular): Da.5 = partner axis
-            PartnerAxis da5 = IsLinear3Control(da2)
-                ? PartnerAxis.Axis1
-                : (PartnerAxis)(partnerAxis & 0x03);
+            PartnerAxis da5 = (PartnerAxis)(partnerAxis & 0x03);
 
             return BuildIdentifierWord(da1, da2, da5, accelTimeNo, decelTimeNo);
         }

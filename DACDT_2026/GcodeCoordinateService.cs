@@ -141,11 +141,37 @@ namespace DACDT_2026
 
                 if (!hasCurrentPoint)
                 {
+                    // Lệnh đầu tiên: tạo primitive di chuyển từ gốc (0,0,0) đến điểm đầu.
+                    // Không skip — cần ghi nhận lệnh G00 đầu tiên để process table có đủ thông tin.
+                    var originPoint = new CadDocumentService.CadCoordinate(0, 0, 0);
+                    bool isFirstRapid = motion == 0;
+                    
+                    // Chỉ tạo primitive nếu điểm đích khác gốc (0,0,0)
+                    if (Math.Abs(nextX) > Epsilon || Math.Abs(nextY) > Epsilon || Math.Abs(nextZ) > Epsilon)
+                    {
+                        result.Primitives.Add(new CadDocumentService.CadPrimitiveData
+                        {
+                            SourceType = isFirstRapid ? "Line (G0 Rapid)" : "Line (G1)",
+                            Points = new List<CadDocumentService.CadCoordinate>
+                            {
+                                new CadDocumentService.CadCoordinate(0, 0, 0),
+                                new CadDocumentService.CadCoordinate(nextX, nextY, nextZ)
+                            },
+                            Center = null,
+                            IsCw = false,
+                            IsCircle = false,
+                            Speed = (isFirstRapid || !modalF.HasValue) ? null : modalF.Value.ToString(CultureInfo.InvariantCulture),
+                            MCodeValue = lineM?.ToString(CultureInfo.InvariantCulture),
+                            Dwell = null
+                        });
+                        AddPoint(result.Points, originPoint);
+                        AddPoint(result.Points, nextPoint);
+                    }
+
                     currentX = nextX;
                     currentY = nextY;
                     currentZ = nextZ;
                     hasCurrentPoint = true;
-                    AddPoint(result.Points, nextPoint);
                     continue;
                 }
 
@@ -337,7 +363,7 @@ namespace DACDT_2026
                 sweep = Math.PI * 2.0;
 
             double radius = Math.Sqrt((startX - centerX) * (startX - centerX) + (startY - centerY) * (startY - centerY));
-            int steps = Math.Max(12, (int)Math.Ceiling(sweep / (Math.PI / 18.0)));
+            int steps = Math.Max(72, (int)Math.Ceiling(sweep / (Math.PI / 90.0)));
             var points = new List<CadDocumentService.CadCoordinate>();
 
             for (int i = 0; i <= steps; i++)

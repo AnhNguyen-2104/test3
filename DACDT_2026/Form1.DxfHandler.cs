@@ -953,28 +953,12 @@ namespace DACDT_2026
             // Snapshot rapidSpeed để dùng trong background thread
             string snapRapidSpeed = rapidSpeed;
 
-            // ── Pre-scan: xác định file có dùng Z không ──
-            // Nếu CÓ bất kỳ Z thay đổi trong file → toàn bộ file dùng Linear3 (3-axis).
-            // Lý do: manual QD75 cấm chuyển 2↔3 axis trong Continuous mode. Để tránh
-            // phải dùng END mid-sequence (đòi hỏi Block Start phức tạp), ta thống nhất
-            // toàn bộ file là 3-axis khi có Z. Trục Z khi không thay đổi sẽ giữ giá trị
-            // hiện tại (modal) — module Linear3 vẫn xử lý đúng (Z đứng yên tự nhiên).
-            bool fileHasZ = false;
-            foreach (var p in activeCadDocument.Primitives ?? new List<CadDocumentService.CadPrimitiveData>())
-            {
-                if (p.Points == null || p.Points.Count < 2) continue;
-                for (int k = 1; k < p.Points.Count; k++)
-                {
-                    if (Math.Abs(p.Points[k].Z - p.Points[k - 1].Z) > 1e-9 ||
-                        Math.Abs(p.Points[k].Z) > 1e-9 ||
-                        Math.Abs(p.Points[0].Z) > 1e-9)
-                    {
-                        fileHasZ = true;
-                        break;
-                    }
-                }
-                if (fileHasZ) break;
-            }
+            // ── Per-line Z detection ──
+            // Mỗi lệnh G0/G1 tự quyết định 2-axis hay 3-axis dựa trên Z của chính lệnh đó:
+            //   - Lệnh có Z (Z thay đổi so với điểm trước, hoặc primitive mang Z khác 0) → 3-axis
+            //   - Lệnh không có Z → 2-axis (Line)
+            //   - G02/G03: LUÔN 2-axis (Arc CW/CCW), bất kể có Z hay không
+            // Khi chuyển 2↔3 axis sẽ được post-process thành Continuous Positioning.
 
             var paths = GetConnectedPathsFromCad(activeCadDocument.Primitives, isGcode: true);
 
@@ -1010,46 +994,8 @@ namespace DACDT_2026
                     //     để PLC dừng, giảm tốc tại điểm start mới, tránh bị kéo qua đoạn không gia công.
                     //
                     // Quy tắc: chỉ dùng Continuous Path nếu đây là path đầu tiên VÀ chỉ có đúng 1 path.
-                    if (pIdx == 0)
-                    {
-                        var startPt   = prim.Points.First();
-                        bool onlyPath = (paths.Count == 1);
-                        double startZ = startPt.Z;
-
-                        // G0 Rapid luôn dùng "Rapid3" → Linear3 (Da.2=0x15), tốc độ rapidSpeed
-                        bool startIsRapid = prim.SourceType.Contains("G0") || prim.SourceType.Contains("Rapid");
-
-                        // Xác định motion prefix cho start point:
-                        // - G0: luôn "Rapid3" (3-axis)
-                        // - File có Z → "Linear3" (3-axis) cho tất cả
-                        // - File không Z → "Line" (2-axis)
-                        string startPrefix;
-                        if (startIsRapid)
-                            startPrefix = "Rapid3";
-                        else
-                            startPrefix = fileHasZ ? "Linear3" : "Line";
-
-                        // Xác định suffix (Continuous Path hoặc Continuous Positioning)
-                        string startSuffix = (isFirstPath && onlyPath)
-                            ? " (Continuous Path)"
-                            : " (Continuous Positioning)";
-
-                        string startMotion = startPrefix + startSuffix;
-
-                        var startRow = new ProcessRow
-                        {
-                            MotionType       = startMotion,
-                            EndCoordinate    = string.Format(CultureInfo.InvariantCulture,
-                                "{0:0.###};{1:0.###}", startPt.X, startPt.Y),
-                            CenterCoordinate = string.Empty,
-                            MCodeValue       = string.Empty, // sẽ được gán từ primitive.MCodeValue qua ApplyPrimitiveExtraData
-                            EndZ             = startZ
-                        };
-                        ApplyPrimitiveExtraData(startRow, prim, isGcode: true);
-                        if (startIsRapid && !string.IsNullOrEmpty(snapRapidSpeed))
-                            startRow.Speed = snapRapidSpeed;
-                        result.Add(startRow);
-                    }
+                    // KHÔNG tạo start row — end points trong vòng lặp for(i=1...) đã đủ.
+                    // Start row trước đây tạo dòng thừa (tọa độ start point) gây lệch buffer.
 
                     if (prim.SourceType.Contains("Line") || prim.SourceType.Contains("Polyline"))
                     {
@@ -1060,17 +1006,10 @@ namespace DACDT_2026
                             bool   isLastInPrim  = (i == prim.Points.Count - 1);
                             string currentSuffix = (isLastInPrim && isLastInPath) ? suffix : " (Continuous Path)";
                             var    pt            = prim.Points[i];
-                            double endZ          = pt.Z;
+                            var    prev          = prim.Points[i - 1];
 
-                            // Xác định motion type:
-                            // - G0 Rapid: luôn "Rapid3" (3-axis)
-                            // - File có Z → "Linear3" (3-axis) cho tất cả G1
-                            // - File không Z → "Line" (2-axis)
-                            string motionPrefix;
-                            if (primIsRapid)
-                                motionPrefix = "Rapid3";
-                            else
-                                motionPrefix = fileHasZ ? "Linear3" : "Line";
+                            // Tất cả G0/G1 đều dùng 2-axis (Line). Z bị bỏ qua.
+                            string motionPrefix = "Line";
 
                             var row = new ProcessRow
                             {
@@ -1078,10 +1017,9 @@ namespace DACDT_2026
                                 EndCoordinate    = string.Format(CultureInfo.InvariantCulture,
                                     "{0:0.###};{1:0.###}", pt.X, pt.Y),
                                 CenterCoordinate = string.Empty,
-                                EndZ             = endZ
+                                EndZ             = 0
                             };
                             ApplyPrimitiveExtraData(row, prim, isGcode: true);
-                            // G0: luôn dùng rapidSpeed, bỏ qua F từ file
                             if (primIsRapid && !string.IsNullOrEmpty(snapRapidSpeed))
                                 row.Speed = snapRapidSpeed;
                             result.Add(row);
@@ -1089,68 +1027,39 @@ namespace DACDT_2026
                     }
                     else if (prim.SourceType.Contains("Arc") || prim.SourceType.Contains("Circle"))
                     {
-                        // Khi file có Z → toàn bộ phải Linear3, không thể dùng Arc 2-axis cùng chuỗi.
-                        // Arc đã được sample thành nhiều điểm trong prim.Points → chuyển thành chuỗi Linear3.
-                        if (fileHasZ)
-                        {
-                            for (int i = 1; i < prim.Points.Count; i++)
-                            {
-                                bool   isLastInPrim  = (i == prim.Points.Count - 1);
-                                string currentSuffix = (isLastInPrim && isLastInPath) ? suffix : " (Continuous Path)";
-                                var    pt            = prim.Points[i];
+                        // G02/G03: LUÔN dùng Arc CW/CCW 2-axis (Da.2=0x0F/0x10).
+                        // Nội suy cung tròn 2 trục X-Y với tâm cung. Z giữ nguyên.
+                        string arcType = prim.IsCw ? "Arc CW" : "Arc CCW";
+                        if (prim.SourceType.Contains("Circle")) arcType = "Circle";
 
-                                var arcRow = new ProcessRow
-                                {
-                                    MotionType       = "Linear3" + currentSuffix,
-                                    EndCoordinate    = string.Format(CultureInfo.InvariantCulture,
-                                        "{0:0.###};{1:0.###}", pt.X, pt.Y),
-                                    CenterCoordinate = string.Empty,
-                                    EndZ             = pt.Z
-                                };
-                                ApplyPrimitiveExtraData(arcRow, prim, isGcode: true);
-                                result.Add(arcRow);
-                            }
-                        }
-                        else
+                        var endPt = prim.Points.Last();
+                        var row   = new ProcessRow
                         {
-                            // File không Z → dùng Arc 2-axis với center point
-                            string arcType = prim.IsCw ? "Arc CW" : "Arc CCW";
-                            if (prim.SourceType.Contains("Circle")) arcType = "Circle";
-
-                            var endPt = prim.Points.Last();
-                            var row   = new ProcessRow
-                            {
-                                MotionType    = arcType + suffix,
-                                EndCoordinate = string.Format(CultureInfo.InvariantCulture,
-                                    "{0:0.###};{1:0.###}", endPt.X, endPt.Y),
-                                EndZ          = endPt.Z
-                            };
-                            if (prim.Center != null)
-                                row.CenterCoordinate = string.Format(CultureInfo.InvariantCulture,
-                                    "{0:0.###};{1:0.###}", prim.Center.X, prim.Center.Y);
-                            ApplyPrimitiveExtraData(row, prim, isGcode: true);
-                            result.Add(row);
-                        }
+                            MotionType    = arcType + suffix,
+                            EndCoordinate = string.Format(CultureInfo.InvariantCulture,
+                                "{0:0.###};{1:0.###}", endPt.X, endPt.Y),
+                            EndZ          = endPt.Z
+                        };
+                        if (prim.Center != null)
+                            row.CenterCoordinate = string.Format(CultureInfo.InvariantCulture,
+                                "{0:0.###};{1:0.###}", prim.Center.X, prim.Center.Y);
+                        ApplyPrimitiveExtraData(row, prim, isGcode: true);
+                        result.Add(row);
                     }
                 }
             }
 
             // ── Post-process: đảm bảo mã lệnh chạy đúng (theo manual SH-080058) ────
             //
-            // Sau pre-scan, toàn bộ file đã thống nhất:
-            //   - File có Z → tất cả là Linear3/Rapid3 (3-axis), không có Arc 2-axis xen kẽ
-            //   - File không Z → tất cả là Line/Arc (2-axis), không có Linear3
-            //
-            // Chỉ cần xử lý:
-            //   1. Dòng cuối chương trình → END (Da.1=0x00)
-            //   2. 3-axis (Linear3/Rapid3) → Continuous Positioning (không Continuous Path)
-            //   3. Chuyển Da.2 trong cùng nhóm (Line↔Arc) → Continuous Positioning để dừng giảm tốc
+            // Tất cả G0/G1/G2/G3 đều là 2-axis. Không có 3-axis → không có lỗi 524.
+            // Quy tắc:
+            //   1. Dòng cuối chương trình → END (Da.1=0)
+            //   2. Chuyển Da.2 (Line↔Arc) → Continuous Positioning (Da.1=1)
+            //   3. Cùng Da.2 liên tiếp → Continuous Path (Da.1=3)
 
             for (int i = 0; i < result.Count; i++)
             {
                 string mtLower = result[i].MotionType.ToLowerInvariant();
-                bool curr3Axis = mtLower.Contains("linear3") || mtLower.Contains("rapid3");
-                bool currIsArc = mtLower.Contains("arc") || mtLower.Contains("circle");
 
                 // ── Quy tắc 1: Dòng cuối chương trình → END ──
                 if (i == result.Count - 1)
@@ -1164,26 +1073,15 @@ namespace DACDT_2026
                     continue;
                 }
 
-                // ── Quy tắc 2: 3-axis luôn Continuous Positioning ──
-                if (curr3Axis && result[i].MotionType.Contains("(Continuous Path)"))
+                // ── Quy tắc 2: Chuyển Line↔Arc → Continuous Positioning ──
+                string nextLower = result[i + 1].MotionType.ToLowerInvariant();
+                bool currIsArc = mtLower.Contains("arc") || mtLower.Contains("circle");
+                bool nextIsArc = nextLower.Contains("arc") || nextLower.Contains("circle");
+
+                if (currIsArc != nextIsArc && result[i].MotionType.Contains("(Continuous Path)"))
                 {
                     result[i].MotionType = result[i].MotionType
                         .Replace("(Continuous Path)", "(Continuous Positioning)");
-                }
-
-                // ── Quy tắc 3: Chuyển Line↔Arc trong file 2-axis → Continuous Positioning ──
-                if (!curr3Axis)
-                {
-                    string nextLower = result[i + 1].MotionType.ToLowerInvariant();
-                    bool nextIsArc   = nextLower.Contains("arc") || nextLower.Contains("circle");
-                    bool currTypeIsArc = currIsArc;
-
-                    if (currTypeIsArc != nextIsArc &&
-                        result[i].MotionType.Contains("(Continuous Path)"))
-                    {
-                        result[i].MotionType = result[i].MotionType
-                            .Replace("(Continuous Path)", "(Continuous Positioning)");
-                    }
                 }
             }
 
