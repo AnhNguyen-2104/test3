@@ -300,6 +300,8 @@ namespace DACDT_2026
         // ── Process value (global speed / Z offsets) ─────────────────────────────
         private async Task HandleProcessValueAsync(string key, string value)
         {
+            bool isZChange = false;
+
             if (string.Equals(key, "speed", StringComparison.OrdinalIgnoreCase))
             {
                 globalSpeed = value;
@@ -307,9 +309,28 @@ namespace DACDT_2026
                     row.Speed = value;
             }
             else if (string.Equals(key, "zDown", StringComparison.OrdinalIgnoreCase))
+            {
                 globalZDown = value;
+                isZChange = true;
+            }
             else if (string.Equals(key, "zSafe", StringComparison.OrdinalIgnoreCase))
+            {
                 globalZSafe = value;
+                isZChange = true;
+            }
+            else if (string.Equals(key, "zStart", StringComparison.OrdinalIgnoreCase))
+            {
+                globalZStart = value;
+                isZChange = true;
+            }
+
+            // Khi Z thay đổi cho file DXF → build lại process table để áp dụng quy tắc
+            // Linear3 (3-axis) hay Line (2-axis) cho từng row, tránh lỗi nạp thiếu Axis 3.
+            bool isDxfDoc = string.Equals(activeDocumentKind, "DXF", StringComparison.OrdinalIgnoreCase);
+            if (isZChange && isDxfDoc && activeCadDocument?.Primitives != null && activeCadDocument.Primitives.Count > 0)
+            {
+                await HandleImportCadToProcessAsync();
+            }
 
             UpdateGcodeFromProcessTable();
             await PushDxfStateAsync();
@@ -591,7 +612,9 @@ namespace DACDT_2026
                     return;
                 }
 
-                bool hasZAxis = dataRows.Exists(r => Math.Abs(r.EndZ) > 1e-9);
+                bool hasZAxis = dataRows.Exists(r =>
+                    r.MotionType != null &&
+                    (r.MotionType.Contains("Linear3") || r.MotionType.Contains("Rapid3") || r.MotionType.Contains("Helical")));
                 string axisInfo = hasZAxis
                     ? "Axis 1 (G2000+) & Axis 2 (G8000+) & Axis 3/Z (G14000+)"
                     : "Axis 1 (G2000+) & Axis 2 (G8000+)";
@@ -695,26 +718,31 @@ namespace DACDT_2026
         // ── Build ProcessRow list for DXF files ──────────────────────────────────
         /// <summary>
         /// Build process rows cho file DXF.
-        /// Logic giống GCODE:
-        ///   - Không dùng MCode
-        ///   - Continuous Positioning: điểm cuối path (trước nhảy sang path mới) — dừng có giảm tốc
-        ///   - Continuous Path: điểm giữa path — chạy không dừng
-        ///   - End: điểm cuối cùng
-        ///   - Z: dùng globalZDown/globalZSafe
-        ///   - Khi có Z: dùng Linear3 (3-axis), không có Z: dùng Line (2-axis)
+        /// Quy tắc Z (giống GCODE):
+        ///   - Z Start: độ cao Z khi bắt đầu một quỹ đạo (path) mới — trục Z chưa hạ
+        ///   - Z Down : độ cao Z khi đang gia công (đầu phun đã hạ)
+        ///   - Z Safe : độ cao Z an toàn khi nhấc lên giữa 2 path
+        /// Quy tắc mã lệnh (giống GCODE):
+        ///   - File có bất kỳ Z ≠ 0 → toàn bộ là Linear3 (3-axis), Arc convert thành chuỗi Linear3
+        ///   - File không Z → Line/Arc 2-axis như bình thường
+        ///   - Linear3/Rapid3 luôn Continuous Positioning (mã 5377/5376)
+        ///   - Line liên tiếp cùng Da.2 → Continuous Path
+        ///   - Dòng cuối chương trình → END
         /// </summary>
         private List<ProcessRow> BuildDxfProcessRows()
         {
             var result = new List<ProcessRow>();
             if (activeCadDocument?.Primitives == null) return result;
 
-            // Parse globalZDown và globalZSafe
-            double zDown = 0.0;
-            double zSafe = 0.0;
-            double.TryParse(globalZDown, NumberStyles.Float, CultureInfo.InvariantCulture, out zDown);
-            double.TryParse(globalZSafe, NumberStyles.Float, CultureInfo.InvariantCulture, out zSafe);
+            // Parse globalZStart/Down/Safe
+            double zStart = 0.0;
+            double zDown  = 0.0;
+            double zSafe  = 0.0;
+            double.TryParse(globalZStart, NumberStyles.Float, CultureInfo.InvariantCulture, out zStart);
+            double.TryParse(globalZDown,  NumberStyles.Float, CultureInfo.InvariantCulture, out zDown);
+            double.TryParse(globalZSafe,  NumberStyles.Float, CultureInfo.InvariantCulture, out zSafe);
 
-            bool hasZ = Math.Abs(zDown) > 1e-9 || Math.Abs(zSafe) > 1e-9;
+            bool hasZ = Math.Abs(zStart) > 1e-9 || Math.Abs(zDown) > 1e-9 || Math.Abs(zSafe) > 1e-9;
             // Chiến lược: nếu file có Z → toàn bộ file dùng Linear3 (3-axis), Arc cũng convert thành chuỗi Linear3.
             // Nếu không Z → dùng Line/Arc 2-axis như bình thường.
             // Lý do: tránh chuyển 2↔3 axis trong cùng chuỗi (Lỗi 524 theo manual SH-080058).
@@ -744,19 +772,20 @@ namespace DACDT_2026
                         : " (Continuous Path)";
 
                     // Điểm đầu tiên của path: di chuyển đến điểm start
-                    // - Path đầu tiên và chỉ có 1 path: Continuous Path (không cần dừng)
-                    // - Path có đoạn đứt quãng: Continuous Positioning (dừng có giảm tốc)
+                    // Theo quy tắc Z mới:
+                    //   - Trục Z di chuyển ở độ cao zStart (chưa hạ đầu phun) khi đến điểm đầu path
+                    //   - Đến điểm đầu path → tiếp theo sẽ hạ xuống zDown để gia công
                     if (isFirstInPath)
                     {
                         var startPt = prim.Points.First();
                         bool onlyPath = (paths.Count == 1);
-                        
+
                         string startSuffix = (isFirstPath && onlyPath)
                             ? " (Continuous Path)"
                             : " (Continuous Positioning)";
-                        
-                        // File có Z → Linear3, không Z → Line (thống nhất toàn bộ file)
-                        double startZ = (isFirstPath && onlyPath) ? zDown : zSafe;
+
+                        // Z điểm bắt đầu path = zStart (di chuyển trên cao trước khi hạ đầu phun)
+                        double startZ = zStart;
                         string motionType = hasZ ? ("Linear3" + startSuffix) : ("Line" + startSuffix);
                         
                         var startRow = new ProcessRow
@@ -810,58 +839,36 @@ namespace DACDT_2026
                     // Xử lý Arc/Circle
                     else if (prim.SourceType.Contains("Arc") || prim.SourceType.Contains("Circle"))
                     {
-                        // Nếu file có Z → toàn bộ phải Linear3, Arc convert thành chuỗi Linear3 từ sample points.
+                        // Nếu file có Z → dùng Helical (3-axis Arc) thay vì Arc 2-axis
+                        // để giữ Arc thành 1 dòng (không nổ thành chuỗi Linear3 → tránh vượt 600 điểm).
+                        // Da.2: 0x22=ABS_HelicalRight (CW), 0x23=ABS_HelicalLeft (CCW)
                         // Nếu file không Z → dùng Arc 2-axis với center point.
+                        string arcType;
                         if (hasZ)
-                        {
-                            for (int ai = 1; ai < prim.Points.Count; ai++)
-                            {
-                                bool   isLastSeg     = (ai == prim.Points.Count - 1);
-                                string currentSuffix = (isLastSeg && isLastInPath) ? suffix : " (Continuous Path)";
-                                var    pt            = prim.Points[ai];
-
-                                double endZSeg;
-                                if (isLastSeg && isLastInPath && !isLastPath)
-                                    endZSeg = zSafe;
-                                else
-                                    endZSeg = zDown;
-
-                                var arcRow = new ProcessRow
-                                {
-                                    MotionType       = "Linear3" + currentSuffix,
-                                    EndCoordinate    = string.Format(CultureInfo.InvariantCulture,
-                                        "{0:0.###};{1:0.###}", pt.X, pt.Y),
-                                    CenterCoordinate = string.Empty,
-                                    MCodeValue       = string.Empty,
-                                    EndZ             = endZSeg
-                                };
-                                ApplyPrimitiveExtraData(arcRow, prim, isGcode: false);
-                                result.Add(arcRow);
-                            }
-                        }
+                            arcType = prim.IsCw ? "Helical CW" : "Helical CCW";
                         else
                         {
-                            string arcType = prim.IsCw ? "Arc CW" : "Arc CCW";
+                            arcType = prim.IsCw ? "Arc CW" : "Arc CCW";
                             if (prim.SourceType.Contains("Circle")) arcType = "Circle";
-
-                            var endPt = prim.Points.Last();
-                            // Z không dùng cho file 2-axis nhưng vẫn lưu để hiển thị
-                            double endZ = (isLastInPath && !isLastPath) ? zSafe : zDown;
-
-                            var row = new ProcessRow
-                            {
-                                MotionType    = arcType + suffix,
-                                EndCoordinate = string.Format(CultureInfo.InvariantCulture,
-                                    "{0:0.###};{1:0.###}", endPt.X, endPt.Y),
-                                MCodeValue    = string.Empty,
-                                EndZ          = endZ
-                            };
-                            if (prim.Center != null)
-                                row.CenterCoordinate = string.Format(CultureInfo.InvariantCulture,
-                                    "{0:0.###};{1:0.###}", prim.Center.X, prim.Center.Y);
-                            ApplyPrimitiveExtraData(row, prim, isGcode: false);
-                            result.Add(row);
                         }
+
+                        var endPt = prim.Points.Last();
+                        // Z điểm cuối: nếu là điểm cuối path trung gian → zSafe (nhấc lên), còn lại zDown
+                        double endZ = (isLastInPath && !isLastPath) ? zSafe : zDown;
+
+                        var row = new ProcessRow
+                        {
+                            MotionType    = arcType + suffix,
+                            EndCoordinate = string.Format(CultureInfo.InvariantCulture,
+                                "{0:0.###};{1:0.###}", endPt.X, endPt.Y),
+                            MCodeValue    = string.Empty,
+                            EndZ          = endZ
+                        };
+                        if (prim.Center != null)
+                            row.CenterCoordinate = string.Format(CultureInfo.InvariantCulture,
+                                "{0:0.###};{1:0.###}", prim.Center.X, prim.Center.Y);
+                        ApplyPrimitiveExtraData(row, prim, isGcode: false);
+                        result.Add(row);
                     }
                 }
             }
@@ -870,13 +877,14 @@ namespace DACDT_2026
             // Sau pre-scan, toàn bộ file đã thống nhất: hoặc Linear3 toàn bộ, hoặc Line/Arc 2-axis toàn bộ.
             // Chỉ cần xử lý:
             //   1. Dòng cuối → END
-            //   2. Linear3 → Continuous Positioning (không Continuous Path)
+            //   2. 3-axis (Linear3 hoặc Helical) → Continuous Positioning (không Continuous Path)
             //   3. Chuyển Line↔Arc trong file 2-axis → Continuous Positioning
             for (int i = 0; i < result.Count; i++)
             {
                 string mtLower = result[i].MotionType.ToLowerInvariant();
-                bool curr3Axis = mtLower.Contains("linear3");
-                bool currIsArc = mtLower.Contains("arc") || mtLower.Contains("circle");
+                // 3-axis bao gồm Linear3 và Helical (Arc 3-axis)
+                bool curr3Axis = mtLower.Contains("linear3") || mtLower.Contains("helical");
+                bool currIsArc = mtLower.Contains("arc") || mtLower.Contains("circle") || mtLower.Contains("helical");
 
                 // Dòng cuối → END
                 if (i == result.Count - 1)
@@ -890,11 +898,25 @@ namespace DACDT_2026
                     continue;
                 }
 
-                // Linear3 → Continuous Positioning
+                // 3-axis → Continuous Positioning (manual cấm Continuous Path cho Helical/Linear3 mixed)
                 if (curr3Axis && result[i].MotionType.Contains("(Continuous Path)"))
                 {
                     result[i].MotionType = result[i].MotionType
                         .Replace("(Continuous Path)", "(Continuous Positioning)");
+                }
+
+                // File 3-axis: chuyển Linear3 ↔ Helical → Continuous Positioning (tránh đổi Da.2 trong Cont.Path)
+                if (curr3Axis)
+                {
+                    string nextLower = result[i + 1].MotionType.ToLowerInvariant();
+                    bool nextIsHelical = nextLower.Contains("helical");
+                    bool currIsHelical = mtLower.Contains("helical");
+                    if (currIsHelical != nextIsHelical &&
+                        result[i].MotionType.Contains("(Continuous Path)"))
+                    {
+                        result[i].MotionType = result[i].MotionType
+                            .Replace("(Continuous Path)", "(Continuous Positioning)");
+                    }
                 }
 
                 // Chuyển Line↔Arc trong file 2-axis → Continuous Positioning
@@ -1020,7 +1042,7 @@ namespace DACDT_2026
                             EndCoordinate    = string.Format(CultureInfo.InvariantCulture,
                                 "{0:0.###};{1:0.###}", startPt.X, startPt.Y),
                             CenterCoordinate = string.Empty,
-                            MCodeValue       = string.Empty, // GCODE không dùng MCode từ DXF logic
+                            MCodeValue       = string.Empty, // sẽ được gán từ primitive.MCodeValue qua ApplyPrimitiveExtraData
                             EndZ             = startZ
                         };
                         ApplyPrimitiveExtraData(startRow, prim, isGcode: true);
@@ -1169,59 +1191,136 @@ namespace DACDT_2026
         }
 
         // ── Connect CAD primitives into chains ───────────────────────────────────
+        /// <summary>
+        /// Nối các primitive thành chuỗi path liên tiếp.
+        /// Tối ưu O(n) bằng spatial hash dictionary thay vì O(n²) so sánh từng cặp.
+        /// Với 5000 primitive: ~5000 lookup thay vì ~25 triệu phép so sánh.
+        /// </summary>
         private List<List<CadDocumentService.CadPrimitiveData>> GetConnectedPathsFromCad(
             List<CadDocumentService.CadPrimitiveData> primitives, bool isGcode = false)
         {
-            var unassigned = new List<CadDocumentService.CadPrimitiveData>(primitives);
-            var paths      = new List<List<CadDocumentService.CadPrimitiveData>>();
+            var paths = new List<List<CadDocumentService.CadPrimitiveData>>();
+            if (primitives == null || primitives.Count == 0) return paths;
 
-            while (unassigned.Count > 0)
+            // Spatial hash: round tọa độ về độ chính xác AreClose (epsilon 0.001) → key string
+            // Một key = (xMm, yMm, zMm) làm tròn 3 chữ số thập phân
+            string KeyOf(CadDocumentService.CadCoordinate p) => isGcode
+                ? string.Format(CultureInfo.InvariantCulture, "{0:0.000}|{1:0.000}|{2:0.000}", p.X, p.Y, p.Z)
+                : string.Format(CultureInfo.InvariantCulture, "{0:0.000}|{1:0.000}", p.X, p.Y);
+
+            // Index endpoints: key → list of (primitive, isStartPoint)
+            // Một key có thể có nhiều primitive trùng đầu/cuối → list
+            var startMap = new Dictionary<string, List<int>>(primitives.Count);
+            var endMap   = new Dictionary<string, List<int>>(primitives.Count);
+            var assigned = new bool[primitives.Count];
+
+            for (int i = 0; i < primitives.Count; i++)
             {
-                var currentPath = new List<CadDocumentService.CadPrimitiveData>();
-                var current     = unassigned[0];
-                unassigned.RemoveAt(0);
-                currentPath.Add(current);
+                var p = primitives[i];
+                if (p.Points == null || p.Points.Count == 0) { assigned[i] = true; continue; }
 
-                bool added = true;
-                while (added)
+                string sk = KeyOf(p.Points[0]);
+                string ek = KeyOf(p.Points[p.Points.Count - 1]);
+
+                if (!startMap.TryGetValue(sk, out var sList)) { sList = new List<int>(); startMap[sk] = sList; }
+                sList.Add(i);
+
+                if (!endMap.TryGetValue(ek, out var eList)) { eList = new List<int>(); endMap[ek] = eList; }
+                eList.Add(i);
+            }
+
+            // Tìm primitive chưa assign tiếp theo bằng cách duyệt tuần tự
+            int searchFrom = 0;
+            while (true)
+            {
+                // Tìm primitive đầu chuỗi mới
+                int seed = -1;
+                for (int i = searchFrom; i < primitives.Count; i++)
                 {
-                    added = false;
-                    var tailPrim = currentPath.Last();
-                    var headPrim = currentPath.First();
+                    if (!assigned[i]) { seed = i; searchFrom = i + 1; break; }
+                }
+                if (seed < 0) break;
 
-                    if (tailPrim.Points == null || tailPrim.Points.Count == 0
-                        || headPrim.Points == null || headPrim.Points.Count == 0) break;
+                var currentPath = new List<CadDocumentService.CadPrimitiveData>();
+                currentPath.Add(primitives[seed]);
+                assigned[seed] = true;
 
-                    var tailPt = tailPrim.Points.Last();
-                    var headPt = headPrim.Points.First();
+                // Mở rộng tail
+                bool grew = true;
+                while (grew)
+                {
+                    grew = false;
+                    var tail = currentPath[currentPath.Count - 1];
+                    if (tail.Points == null || tail.Points.Count == 0) break;
+                    string tailKey = KeyOf(tail.Points[tail.Points.Count - 1]);
 
-                    for (int i = 0; i < unassigned.Count; i++)
+                    // Tìm cand có start trùng tail
+                    if (startMap.TryGetValue(tailKey, out var candStarts))
                     {
-                        var cand = unassigned[i];
-                        if (cand.Points == null || cand.Points.Count == 0) continue;
+                        foreach (int ci in candStarts)
+                        {
+                            if (assigned[ci]) continue;
+                            currentPath.Add(primitives[ci]);
+                            assigned[ci] = true;
+                            grew = true;
+                            break;
+                        }
+                    }
+                    if (grew) continue;
 
-                        var candStart = cand.Points.First();
-                        var candEnd   = cand.Points.Last();
+                    // Tìm cand có end trùng tail → reverse
+                    if (endMap.TryGetValue(tailKey, out var candEnds))
+                    {
+                        foreach (int ci in candEnds)
+                        {
+                            if (assigned[ci]) continue;
+                            var cand = primitives[ci];
+                            cand.Points.Reverse();
+                            if (cand.SourceType != null && cand.SourceType.Contains("Arc")) cand.IsCw = !cand.IsCw;
+                            currentPath.Add(cand);
+                            assigned[ci] = true;
+                            grew = true;
+                            break;
+                        }
+                    }
+                }
 
-                        if (AreClose(tailPt, candStart, isGcode))
+                // Mở rộng head
+                grew = true;
+                while (grew)
+                {
+                    grew = false;
+                    var head = currentPath[0];
+                    if (head.Points == null || head.Points.Count == 0) break;
+                    string headKey = KeyOf(head.Points[0]);
+
+                    // Tìm cand có end trùng head
+                    if (endMap.TryGetValue(headKey, out var candEnds))
+                    {
+                        foreach (int ci in candEnds)
                         {
-                            currentPath.Add(cand); unassigned.RemoveAt(i); added = true; break;
+                            if (assigned[ci]) continue;
+                            currentPath.Insert(0, primitives[ci]);
+                            assigned[ci] = true;
+                            grew = true;
+                            break;
                         }
-                        else if (AreClose(tailPt, candEnd, isGcode))
+                    }
+                    if (grew) continue;
+
+                    // Tìm cand có start trùng head → reverse
+                    if (startMap.TryGetValue(headKey, out var candStarts))
+                    {
+                        foreach (int ci in candStarts)
                         {
+                            if (assigned[ci]) continue;
+                            var cand = primitives[ci];
                             cand.Points.Reverse();
-                            if (cand.SourceType.Contains("Arc")) cand.IsCw = !cand.IsCw;
-                            currentPath.Add(cand); unassigned.RemoveAt(i); added = true; break;
-                        }
-                        else if (AreClose(headPt, candEnd, isGcode))
-                        {
-                            currentPath.Insert(0, cand); unassigned.RemoveAt(i); added = true; break;
-                        }
-                        else if (AreClose(headPt, candStart, isGcode))
-                        {
-                            cand.Points.Reverse();
-                            if (cand.SourceType.Contains("Arc")) cand.IsCw = !cand.IsCw;
-                            currentPath.Insert(0, cand); unassigned.RemoveAt(i); added = true; break;
+                            if (cand.SourceType != null && cand.SourceType.Contains("Arc")) cand.IsCw = !cand.IsCw;
+                            currentPath.Insert(0, cand);
+                            assigned[ci] = true;
+                            grew = true;
+                            break;
                         }
                     }
                 }
@@ -1245,8 +1344,9 @@ namespace DACDT_2026
 
         private static void ApplyPrimitiveExtraData(ProcessRow row, CadDocumentService.CadPrimitiveData primitive, bool isGcode = false)
         {
-            // M code từ G-code file không gửi xuống PLC — chỉ áp dụng cho DXF
-            if (!isGcode && !string.IsNullOrWhiteSpace(primitive?.MCodeValue))
+            // M code áp dụng cho cả DXF và GCODE: gửi xuống PLC qua Da.10 (M code register).
+            // Hỗ trợ M00/M02/M03/M04/M05/M06/M30... — PLC ladder sẽ xử lý từng mã.
+            if (!string.IsNullOrWhiteSpace(primitive?.MCodeValue))
                 row.MCodeValue = primitive.MCodeValue;
             if (!string.IsNullOrWhiteSpace(primitive?.Speed))
                 row.Speed = primitive.Speed;
@@ -1323,6 +1423,7 @@ namespace DACDT_2026
             processRows.Add(new ProcessRow { Key = "start",      MotionType = "Điểm bắt đầu" });
             processRows.Add(new ProcessRow { Key = "glueStart",  MotionType = "Điểm bắt đầu bơm", MCodeValue = "Bật keo" });
             processRows.Add(new ProcessRow { Key = "glueEnd",    MotionType = "Điểm kết thúc bơm", MCodeValue = "Tắt keo" });
+            processRows.Add(new ProcessRow { Key = "zStart",     MotionType = "Độ cao Z bắt đầu" });
             processRows.Add(new ProcessRow { Key = "zDown",      MotionType = "Độ cao Z hạ" });
             processRows.Add(new ProcessRow { Key = "zSafe",      MotionType = "Độ cao Z an toàn" });
             processRows.Add(new ProcessRow { Key = "speed",      MotionType = "Tốc độ" });

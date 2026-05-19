@@ -42,6 +42,8 @@ namespace DACDT_2026
                     currentPosAddr   = $"D{i * 10}",
                     currentSpeed     = connected ? FormatSpeedMm(axCurrentSpeed[i])   : dash,
                     currentSpeedAddr = $"D{i * 10 + 4}",
+                    mCode            = connected ? axMCode[i].ToString(CultureInfo.InvariantCulture) : dash,
+                    mCodeAddr        = $"D{i * 10 + 104}",
                     errorCode        = connected ? axErrorCode[i].ToString(CultureInfo.InvariantCulture) : dash,
                     errorCodeAddr    = $"U0\\G{mb + OffErrorCode}",
                     warningCode      = connected ? axWarningCode[i].ToString(CultureInfo.InvariantCulture) : dash,

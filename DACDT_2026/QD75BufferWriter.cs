@@ -176,7 +176,12 @@ namespace DACDT_2026
                 da1 = OperationPattern.ContinuousPath; // default cho điểm giữa
 
             // ── Da.2 Control system ──
-            if      (s.Contains("arc cw")  || s.Contains("arc circular right"))
+            // Ưu tiên Helical (3-axis Arc) trước Arc thường (2-axis)
+            if      (s.Contains("helical cw")  || s.Contains("helical right"))
+                da2 = ControlSystem.ABS_HelicalRight;      // 0x22 — Arc 3-axis CW
+            else if (s.Contains("helical ccw") || s.Contains("helical left"))
+                da2 = ControlSystem.ABS_HelicalLeft;       // 0x23 — Arc 3-axis CCW
+            else if (s.Contains("arc cw")  || s.Contains("arc circular right"))
                 da2 = ControlSystem.ABS_CircularRight;     // 0x0F
             else if (s.Contains("arc ccw") || s.Contains("arc circular left"))
                 da2 = ControlSystem.ABS_CircularLeft;      // 0x10
@@ -186,6 +191,16 @@ namespace DACDT_2026
                 da2 = ControlSystem.ABS_Linear3;           // 0x15
             else
                 da2 = ControlSystem.ABS_Linear2;           // 0x0A
+        }
+
+        /// <summary>
+        /// Kiểm tra Da.2 có thuộc nhóm Linear3 (3-axis tuyến tính) hay không.
+        /// Linear3 không cần Da.5 vì module tự xác định 3 trục.
+        /// </summary>
+        public static bool IsLinear3Control(ControlSystem da2)
+        {
+            int v = (int)da2;
+            return v == 0x15 || v == 0x16; // ABS_Linear3 / INC_Linear3
         }
 
         /// <summary>
@@ -220,9 +235,12 @@ namespace DACDT_2026
         {
             ParseMotionType(motionType, out OperationPattern da1, out ControlSystem da2);
 
-            // Da.5: chỉ set cho 2-axis. 3-axis (Linear3/Helical) tự xác định 3 trục.
-            PartnerAxis da5 = Is3AxisControl(da2)
-                ? PartnerAxis.Axis1 // ignored by module for 3-axis
+            // Da.5 quy tắc:
+            //   - Linear3 (3-axis tuyến tính): module tự xác định 3 trục → Da.5 = 0
+            //   - Helical (3-axis cung tròn): Da.5 = trục nội suy cung tròn
+            //   - 2-axis (Linear2/Circular): Da.5 = partner axis
+            PartnerAxis da5 = IsLinear3Control(da2)
+                ? PartnerAxis.Axis1
                 : (PartnerAxis)(partnerAxis & 0x03);
 
             return BuildIdentifierWord(da1, da2, da5, accelTimeNo, decelTimeNo);
@@ -674,6 +692,39 @@ namespace DACDT_2026
                 return result;
             }
 
+            // QD75 buffer giới hạn tối đa 600 positioning data point cho mỗi axis.
+            // Nếu vượt, cắt và cảnh báo — tránh tràn sang vùng buffer khác.
+            const int MaxPoints = 600;
+            if (rows.Count > MaxPoints)
+            {
+                result.WriteResults.Add(new WriteResult
+                {
+                    Address = "Bulk",
+                    Value = rows.Count.ToString(),
+                    Status = "Warning",
+                    Message = $"File có {rows.Count} điểm vượt giới hạn QD75 (600 điểm). Đã cắt còn {MaxPoints} điểm đầu."
+                });
+                rows = rows.GetRange(0, MaxPoints);
+            }
+
+            // Đảm bảo dòng cuối cùng thực sự là END (Da.1 = 00).
+            // Sau khi cắt 600 điểm, dòng 600 phải END để module dừng đúng,
+            // tránh đọc tiếp vào vùng buffer chứa rác (NOP/0).
+            if (rows.Count > 0)
+            {
+                var last = rows[rows.Count - 1];
+                if (last != null && !string.IsNullOrEmpty(last.MotionType))
+                {
+                    string mt = last.MotionType;
+                    if (!mt.Contains("(End)") && !mt.Contains(" (End)"))
+                    {
+                        last.MotionType = mt
+                            .Replace("(Continuous Path)", " (End)")
+                            .Replace("(Continuous Positioning)", " (End)");
+                    }
+                }
+            }
+
             int baseG = ProgramBaseG[axisIndex];
             int totalWords = rows.Count * Stride;
             short[] bulkData = new short[totalWords];
@@ -694,9 +745,10 @@ namespace DACDT_2026
                 //   - "Arc CW/CCW" → circular (Da.2=0x0F/0x10)
                 // Không cần override effectiveMotionType — dùng trực tiếp row.MotionType.
                 string effectiveMotionType = row.MotionType;
-                bool isRapid3 = row.MotionType.Contains("Rapid3");
+                bool isRapid3  = row.MotionType.Contains("Rapid3");
                 bool isLinear3 = row.MotionType.Contains("Linear3");
-                bool is3Axis = isRapid3 || isLinear3;
+                bool isHelical = row.MotionType.Contains("Helical");
+                bool is3Axis   = isRapid3 || isLinear3 || isHelical;
 
                 if (is3Axis)
                     hasAnyZ = true;
@@ -868,6 +920,13 @@ namespace DACDT_2026
                 result.Success = false;
                 result.ErrorMessage = "No points to send.";
                 return result;
+            }
+
+            // QD75 buffer giới hạn tối đa 600 positioning data point cho slave axis.
+            const int MaxPoints = 600;
+            if (rows.Count > MaxPoints)
+            {
+                rows = rows.GetRange(0, MaxPoints);
             }
 
             int totalWords = rows.Count * Stride;

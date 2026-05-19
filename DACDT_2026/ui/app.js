@@ -392,11 +392,15 @@ function bindEvents() {
   const zOffsetsBtn = document.getElementById("set-z-offsets-btn");
   if (zOffsetsBtn) {
     zOffsetsBtn.addEventListener("click", () => {
-      const zDown = parseFloat((document.getElementById("z-down-input") || {}).value) || 0;
-      const zSafe = parseFloat((document.getElementById("z-safe-input") || {}).value) || 5;
-      post("setZOffsets", { zDown, zSafe });
+      const zStart = parseFloat((document.getElementById("z-start-input") || {}).value) || 0;
+      const zDown  = parseFloat((document.getElementById("z-down-input")  || {}).value) || 0;
+      const zSafe  = parseFloat((document.getElementById("z-safe-input")  || {}).value) || 5;
+      // Gửi từng key qua setProcessValue (đồng nhất với cách đã có)
+      post("setProcessValue", { key: "zStart", value: String(zStart) });
+      post("setProcessValue", { key: "zDown",  value: String(zDown)  });
+      post("setProcessValue", { key: "zSafe",  value: String(zSafe)  });
       const st = document.getElementById("z-offsets-status");
-      if (st) { st.textContent = "✓ Z Down=" + zDown + " Z Safe=" + zSafe; setTimeout(() => { st.textContent = ""; }, 3000); }
+      if (st) { st.textContent = "✓ Z Start=" + zStart + " Z Down=" + zDown + " Z Safe=" + zSafe; setTimeout(() => { st.textContent = ""; }, 3000); }
     });
   }
 }
@@ -480,6 +484,7 @@ function renderControl() {
   const fields = [
     { key: 'currentPos', label: 'CURRENT POSITION (mm)', addrKey: 'currentPosAddr', big: true },
     { key: 'currentSpeed', label: 'CURRENT SPEED (mm/min)', addrKey: 'currentSpeedAddr', big: true },
+    { key: 'mCode', label: 'M CODE HIỆN TẠI', addrKey: 'mCodeAddr' },
     { key: 'errorCode', label: 'ERROR CODE', addrKey: 'errorCodeAddr' },
     { key: 'warningCode', label: 'WARNING CODE', addrKey: 'warningCodeAddr' },
     { key: 'axisStatus', label: 'AXIS STATUS', addrKey: 'axisStatusAddr' },
@@ -596,6 +601,7 @@ function renderDxf() {
 
 function renderPointsTable() {
   const points = state.dxf.points || [], primitives = state.dxf.primitives || [], rows = [];
+  const MAX_VISIBLE_PRIMS = 500; // Giới hạn số primitive hiển thị để tránh lag UI
   function pz(p) { return p && p.z != null ? Number(p.z) : 0; }
 
   // Build lookup map một lần O(n) thay vì find() O(n) mỗi điểm
@@ -610,7 +616,10 @@ function renderPointsTable() {
   }
 
   let ai = 1;
-  for (const prim of primitives) {
+  const primsToRender = primitives.length > MAX_VISIBLE_PRIMS
+    ? primitives.slice(0, MAX_VISIBLE_PRIMS)
+    : primitives;
+  for (const prim of primsToRender) {
     if (!prim.points || !prim.points.length) continue;
     let dt = "Line";
     const st = (prim.sourceType || "").toLowerCase();
@@ -638,6 +647,9 @@ function renderPointsTable() {
       const stt = (found && found.index != null) ? found.index : ai++;
       rows.push(`<tr data-point-key="${esc(key)}"><td>${esc(stt)}</td><td>${esc(dt)}</td><td>${Number(s.x).toFixed(3)}</td><td>${Number(s.y).toFixed(3)}</td><td>${pz(s).toFixed(3)}</td><td>${Number(e.x).toFixed(3)}</td><td>${Number(e.y).toFixed(3)}</td><td>${pz(e).toFixed(3)}</td><td>${esc(cx)}</td><td>${esc(cy)}</td><td>${esc(cz)}</td></tr>`);
     }
+  }
+  if (primitives.length > MAX_VISIBLE_PRIMS) {
+    rows.push(`<tr><td colspan="11" style="text-align:center;color:var(--muted);font-style:italic;">... ${primitives.length - MAX_VISIBLE_PRIMS} primitive khác bị ẩn để tăng tốc UI (tổng ${primitives.length})</td></tr>`);
   }
   dom.pointsBody.innerHTML = rows.join("");
 }

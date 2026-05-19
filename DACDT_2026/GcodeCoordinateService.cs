@@ -59,7 +59,7 @@ namespace DACDT_2026
             bool hasCurrentPoint = false;
             int modalMotion = 1;
             double? modalF = null;      // Modal F cho G1/G2/G3 — chỉ cập nhật khi không phải G0
-            int? modalM = null;
+            // M code KHÔNG modal: chỉ áp dụng cho dòng có M, không lan sang dòng kế tiếp.
 
             foreach (string rawLine in lines)
             {
@@ -106,6 +106,12 @@ namespace DACDT_2026
                         continue;
                     }
 
+                    // G54–G59: chọn hệ tọa độ phôi (work coordinate system).
+                    // Hiện tại offset gốc phôi được set qua UI (offsetX/offsetY), nên G54–G59
+                    // chỉ skip an toàn để tránh parser hiểu nhầm là motion modal.
+                    if (frame.G.Value >= 54 && frame.G.Value <= 59)
+                        continue;
+
                     if (frame.G.Value >= 0 && frame.G.Value <= 3)
                         modalMotion = frame.G.Value;
                 }
@@ -117,7 +123,8 @@ namespace DACDT_2026
                 double? currentF = frame.F.HasValue ? frame.F.Value : (double?)null;
                 // modalF chỉ cập nhật khi motion là G1/G2/G3 — G0 không ảnh hưởng modal feed
                 if (frame.F.HasValue && motion != 0) modalF = frame.F.Value;
-                if (frame.M.HasValue) modalM = frame.M.Value;
+                // M code: KHÔNG modal — chỉ dùng cho dòng hiện tại
+                int? lineM = frame.M.HasValue ? (int?)frame.M.Value : null;
 
                 bool hasCoordinate = frame.X.HasValue || frame.Y.HasValue || frame.Z.HasValue;
                 bool isArc = motion == 2 || motion == 3;
@@ -145,13 +152,20 @@ namespace DACDT_2026
                 var startPoint = new CadDocumentService.CadCoordinate(currentX, currentY, currentZ);
 
                 if (isArc)
-                    AddArcPrimitive(result, frame, startPoint, nextPoint, motion == 2, unitScale, modalF, modalM, frame.P);
+                    AddArcPrimitive(result, frame, startPoint, nextPoint, motion == 2, unitScale, modalF, lineM, frame.P);
                 else if (!AreClose(startPoint, nextPoint))
                 {
                     bool isRapid = motion == 0;
                     // G0 Rapid: không lưu speed từ file — speed sẽ được gán từ rapidSpeed khi build ProcessRow
                     double? lineSpeed = isRapid ? (double?)null : modalF;
-                    AddLinePrimitive(result, startPoint, nextPoint, isRapid, lineSpeed, modalM, frame.P);
+                    AddLinePrimitive(result, startPoint, nextPoint, isRapid, lineSpeed, lineM, frame.P);
+                }
+                else if (lineM.HasValue && result.Primitives.Count > 0)
+                {
+                    // Dòng M code đứng riêng (M00/M02/M05/M30...) không có chuyển động.
+                    // Gán M code vào primitive cuối cùng để vẫn được gửi xuống PLC (Da.10).
+                    var lastPrim = result.Primitives[result.Primitives.Count - 1];
+                    lastPrim.MCodeValue = lineM.Value.ToString(CultureInfo.InvariantCulture);
                 }
 
                 currentX = nextX;
@@ -462,9 +476,17 @@ namespace DACDT_2026
                 return string.Empty;
 
             string line = rawLine;
+
+            // Strip checksum (*nn ở cuối dòng)
             int checksumIndex = line.IndexOf('*');
             if (checksumIndex >= 0)
                 line = line.Substring(0, checksumIndex);
+
+            // Strip line comment (; ...) — phần sau dấu chấm phẩy là comment, bỏ qua
+            // để tránh parser đọc nhầm "M03" trong comment thành M code thật.
+            int semicolonIndex = line.IndexOf(';');
+            if (semicolonIndex >= 0)
+                line = line.Substring(0, semicolonIndex);
 
             return StripParentheses(line).Trim();
         }

@@ -66,6 +66,7 @@ namespace DACDT_2026
         // Axis data (4 axes)
         private readonly int[] axCurrentPos   = new int[4];
         private readonly int[] axCurrentSpeed = new int[4];
+        private readonly int[] axMCode        = new int[4];
         private readonly int[] axErrorCode    = new int[4];
         private readonly int[] axWarningCode  = new int[4];
         private readonly int[] axAxisStatus   = new int[4];
@@ -86,8 +87,9 @@ namespace DACDT_2026
         private CadDocumentService.CadLoadResult activeCadDocument;
         private string selectedCadPointKey;
         private string activeDocumentKind = "DXF";
-        private string globalZDown = "";
-        private string globalZSafe = "";
+        private string globalZDown  = "";
+        private string globalZSafe  = "";
+        private string globalZStart = "";
         private string globalSpeed = "1000";
         private string rapidSpeed  = "10000"; // Tốc độ G00 — cài đặt từ Settings tab
         private double offsetX = 0.0;

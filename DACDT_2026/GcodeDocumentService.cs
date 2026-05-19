@@ -496,7 +496,7 @@ namespace DACDT_2026
                 sweep = Math.PI * 2.0;
             }
 
-            int steps = Math.Max(12, (int)Math.Ceiling(sweep / (Math.PI / 18.0)));
+            int steps = Math.Max(72, (int)Math.Ceiling(sweep / (Math.PI / 90.0)));
             double radius = Math.Sqrt(
                 (startX - centerX) * (startX - centerX)
                 + (startY - centerY) * (startY - centerY));

@@ -259,6 +259,15 @@ namespace DACDT_2026
                             int[] speedData = comm.ReadDeviceRange($"D{dBase + 4}", 2);
                             axCurrentSpeed[i] = (speedData[1] << 16) | (speedData[0] & 0xFFFF);
 
+                            // M code hiện tại do PLC ladder ghi vào D104, D114, D124, D134
+                            // (axis 1 = D104, axis 2 = D114, ... — pattern +10 per axis giống position/speed)
+                            try
+                            {
+                                int[] mcodeData = comm.ReadDeviceRange($"D{dBase + 104}", 1);
+                                axMCode[i] = mcodeData[0];
+                            }
+                            catch { axMCode[i] = 0; }
+
                             // Error, warning, axis status from buffer memory
                             int[] mon = comm.ReadBuffer(0, MonitorBaseG[i], 38);
                             axErrorCode[i]     = mon[OffErrorCode];
