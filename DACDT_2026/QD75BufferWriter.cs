@@ -82,14 +82,135 @@ namespace DACDT_2026
         }
 
         /// <summary>
+        // ── QD75 Positioning Identifier — chuẩn enum theo manual SH-080058 ─────
+        //
+        // Mỗi điểm Positioning Data chiếm 10 word. Offset 0 là Positioning Identifier
+        // (gộp Da.1, Da.2, Da.3, Da.4, Da.5) theo bit layout:
+        //   b1 – b0  : Da.1 Operation pattern  (0=END, 1=Cont.Pos, 3=Cont.Path)
+        //   b3 – b2  : Da.5 Axis to interpolate (0=Axis1, 1=Axis2, 2=Axis3, 3=Axis4)
+        //   b5 – b4  : Da.3 Acceleration time No. (0–3)
+        //   b7 – b6  : Da.4 Deceleration time No. (0–3)
+        //   b15– b8  : Da.2 Control system
+
+        /// <summary>Da.1 Operation pattern (b1–b0).</summary>
+        public enum OperationPattern
+        {
+            PositioningComplete   = 0,  // END — kết thúc chương trình
+            ContinuousPositioning = 1,  // dừng có tăng/giảm tốc tại điểm
+            ContinuousPath        = 3,  // chạy liên tục không dừng
+        }
+
+        /// <summary>Da.2 Control system (b15–b8).</summary>
+        public enum ControlSystem
+        {
+            // 1-axis linear
+            ABS_Linear1        = 0x01,
+            INC_Linear1        = 0x02,
+            // 2-axis linear
+            ABS_Linear2        = 0x0A,
+            INC_Linear2        = 0x0B,
+            // 2-axis circular center-point
+            ABS_CircularRight  = 0x0F,
+            ABS_CircularLeft   = 0x10,
+            INC_CircularRight  = 0x11,
+            INC_CircularLeft   = 0x12,
+            // 2-axis circular sub-point
+            ABS_CircularSub    = 0x0D,
+            INC_CircularSub    = 0x0E,
+            // 3-axis linear
+            ABS_Linear3        = 0x15,
+            INC_Linear3        = 0x16,
+            // 3-axis helical center-point
+            ABS_HelicalRight   = 0x22,
+            ABS_HelicalLeft    = 0x23,
+            INC_HelicalRight   = 0x24,
+            INC_HelicalLeft    = 0x25,
+            // 3-axis helical sub-point
+            ABS_HelicalSub     = 0x20,
+            INC_HelicalSub     = 0x21,
+        }
+
+        /// <summary>Da.5 Axis to interpolate (b3–b2).</summary>
+        public enum PartnerAxis
+        {
+            Axis1 = 0, Axis2 = 1, Axis3 = 2, Axis4 = 3,
+        }
+
+        /// <summary>
+        /// Gộp Da.1~Da.5 thành 1 word 16-bit theo chuẩn QD75.
+        /// </summary>
+        public static short BuildIdentifierWord(
+            OperationPattern da1,
+            ControlSystem    da2,
+            PartnerAxis      da5      = PartnerAxis.Axis2,
+            int              accelNo  = 0,
+            int              decelNo  = 0)
+        {
+            int wordValue =
+                ((int)da1 & 0x03)            |
+                (((int)da5 & 0x03) << 2)     |
+                ((accelNo & 0x03) << 4)      |
+                ((decelNo & 0x03) << 6)      |
+                (((int)da2 & 0xFF) << 8);
+            return unchecked((short)wordValue);
+        }
+
+        /// <summary>
+        /// Phân tích MotionType string → (Da.1, Da.2, isInterpolation3Axis).
+        /// MotionType có dạng: "{Prefix} ({OperationPattern})"
+        ///   Prefix: "Line" | "Linear3" | "Rapid3" | "Arc CW" | "Arc CCW" | "Circle"
+        ///   OperationPattern: "End" | "Continuous Positioning" | "Continuous Path"
+        /// </summary>
+        public static void ParseMotionType(string motionType, out OperationPattern da1, out ControlSystem da2)
+        {
+            string s = (motionType ?? string.Empty).Trim().ToLowerInvariant();
+
+            // ── Da.1 Operation pattern ──
+            if (s.Contains("end") || s.Contains("hoàn thành"))
+                da1 = OperationPattern.PositioningComplete;
+            else if (s.Contains("continuous positioning") || s.Contains("điểm kế tiếp"))
+                da1 = OperationPattern.ContinuousPositioning;
+            else if (s.Contains("continuous path") || s.Contains("liên tục"))
+                da1 = OperationPattern.ContinuousPath;
+            else
+                da1 = OperationPattern.ContinuousPath; // default cho điểm giữa
+
+            // ── Da.2 Control system ──
+            if      (s.Contains("arc cw")  || s.Contains("arc circular right"))
+                da2 = ControlSystem.ABS_CircularRight;     // 0x0F
+            else if (s.Contains("arc ccw") || s.Contains("arc circular left"))
+                da2 = ControlSystem.ABS_CircularLeft;      // 0x10
+            else if (s.Contains("circle"))
+                da2 = s.Contains("ccw") ? ControlSystem.ABS_CircularLeft : ControlSystem.ABS_CircularRight;
+            else if (s.Contains("linear3") || s.Contains("3-axis") || s.Contains("rapid3"))
+                da2 = ControlSystem.ABS_Linear3;           // 0x15
+            else
+                da2 = ControlSystem.ABS_Linear2;           // 0x0A
+        }
+
+        /// <summary>
+        /// Kiểm tra Da.2 có thuộc nhóm 3-axis hay không (Linear3 / Helical).
+        /// </summary>
+        public static bool Is3AxisControl(ControlSystem da2)
+        {
+            int v = (int)da2;
+            return v == 0x15 || v == 0x16 || (v >= 0x20 && v <= 0x25);
+        }
+
+        /// <summary>
         /// Build QD75 Positioning Identifier word (Da.1 ~ Da.5) from motion type string.
         ///
-        /// Correct bit layout (per QD75 manual):
-        ///   b1 – b0  : Da.1 Operation pattern  (00=END, 01=Cont.Pos, 11=Cont.Path)
-        ///   b3 – b2  : Da.5 Axis to interpolate (00=Axis1, 01=Axis2, 10=Axis3, 11=Axis4)
+        /// Bit layout (per QD75 manual SH-080058):
+        ///   b1 – b0  : Da.1 Operation pattern  (0=END, 1=Cont.Pos, 3=Cont.Path)
+        ///   b3 – b2  : Da.5 Axis to interpolate (0=Axis1, 1=Axis2, 2=Axis3, 3=Axis4)
         ///   b5 – b4  : Da.3 Acceleration time No. (0–3)
         ///   b7 – b6  : Da.4 Deceleration time No. (0–3)
         ///   b15– b8  : Da.2 Control system
+        ///
+        /// Da.5 quy tắc:
+        ///   - 3-axis interpolation (Linear3/Helical): Da.5 không cần set, để 0
+        ///   - 2-axis interpolation (Linear2/Circular): Da.5 = partner axis
+        ///   - 1-axis linear: Da.5 không dùng
         /// </summary>
         public static short BuildPositioningIdentifierWord(
             string motionType,
@@ -97,50 +218,14 @@ namespace DACDT_2026
             int accelTimeNo = 0,
             int decelTimeNo = 0)
         {
-            string s = (motionType ?? string.Empty).Trim().ToLowerInvariant();
+            ParseMotionType(motionType, out OperationPattern da1, out ControlSystem da2);
 
-            // ── Da.1 Operation pattern ────────────────────────────────────────────
-            // b1–b0: 00=PositioningComplete(END), 01=ContinuousPositioning, 11=ContinuousPath
-            int da1 = 0x00; // default: Positioning Complete (END)
-            bool isEnd = s.Contains("end") || s.Contains("hoàn thành");
+            // Da.5: chỉ set cho 2-axis. 3-axis (Linear3/Helical) tự xác định 3 trục.
+            PartnerAxis da5 = Is3AxisControl(da2)
+                ? PartnerAxis.Axis1 // ignored by module for 3-axis
+                : (PartnerAxis)(partnerAxis & 0x03);
 
-            if (!isEnd)
-            {
-                bool isContinuousPositioning = s.Contains("continuous positioning") || s.Contains("điểm kế tiếp");
-                bool isContinuousPath        = s.Contains("continuous path")        || s.Contains("liên tục");
-                if (isContinuousPositioning)       da1 = 0x01;
-                else if (isContinuousPath)         da1 = 0x03;
-                else                               da1 = 0x03; // default to continuous path for mid-points
-            }
-
-            // ── Da.2 Control system ───────────────────────────────────────────────
-            // b15–b8
-            int da2;
-            if      (s.Contains("arc cw")  || s.Contains("arc circular right")) da2 = 0x0F; // ABS_CircularRight
-            else if (s.Contains("arc ccw") || s.Contains("arc circular left"))  da2 = 0x10; // ABS_CircularLeft
-            else if (s.Contains("circle"))
-                da2 = s.Contains("ccw") ? 0x10 : 0x0F;                                      // circle default CW
-            else if (s.Contains("linear3") || s.Contains("3-axis") || s.Contains("rapid3"))
-                da2 = 0x15;                                                                  // ABS_Linear3 (3-axis) = 0x15
-            else
-                da2 = 0x0A;                                                                  // ABS_Linear2 (2-axis interpolation)
-
-            // ── Da.5 Partner axis (b3–b2), Da.3 Acc (b5–b4), Da.4 Dec (b7–b6) ──
-            // Da.5 = 0 khi:
-            //   - 3-axis interpolation (Linear3/Rapid3): không cần partner axis
-            //   - Continuous Positioning (Da.1=01): dừng tại điểm, không nội suy
-            //   - End (Da.1=00): kết thúc, không nội suy
-            // Da.5 = partnerAxis chỉ khi Continuous Path (Da.1=11) với 2-axis
-            bool is3Axis = s.Contains("linear3") || s.Contains("3-axis") || s.Contains("rapid3");
-            bool needsPartner = !is3Axis && da1 == 0x03; // chỉ Continuous Path 2-axis mới cần partner
-            int da5 = needsPartner ? (partnerAxis & 0x03) : 0;
-            int da3 = accelTimeNo & 0x03;
-            int da4 = decelTimeNo & 0x03;
-
-            // Assemble: b1-b0=Da.1 | b3-b2=Da.5 | b5-b4=Da.3 | b7-b6=Da.4 | b15-b8=Da.2
-            int wordValue = da1 | (da5 << 2) | (da3 << 4) | (da4 << 6) | (da2 << 8);
-
-            return unchecked((short)wordValue);
+            return BuildIdentifierWord(da1, da2, da5, accelTimeNo, decelTimeNo);
         }
 
 
@@ -568,7 +653,8 @@ namespace DACDT_2026
         /// <summary>
         /// Send all positioning data rows to PLC using a single bulk WriteBuffer call.
         /// This is significantly faster than individual writes for large point sets.
-        /// Rows with EndZ != 0 use Da.2=0x0B (ABS_Linear3) and also write Z to Axis 3 buffer (G14000+).
+        /// MotionType đã được post-process đúng: Linear3/Rapid3 = 3-axis, Line = 2-axis.
+        /// Axis 3 (Z) buffer chỉ được ghi cho các dòng 3-axis.
         /// </summary>
         public static SendResult WritePositioningDataBulk(PLCCommunication plcComm, int axisIndex, List<PositioningDataRow> rows, bool writeStartNo = true)
         {
@@ -602,21 +688,19 @@ namespace DACDT_2026
                 int blockOffset = i * Stride;
 
                 // 1. Positioning Identifier (16-bit)
-                // Rapid3 → luôn Linear3. Line có Z → Linear3. Còn lại → MotionType gốc.
+                // MotionType đã được post-process đúng:
+                //   - "Linear3" hoặc "Rapid3" → 3-axis (Da.2=0x15)
+                //   - "Line" → 2-axis (Da.2=0x0A)
+                //   - "Arc CW/CCW" → circular (Da.2=0x0F/0x10)
+                // Không cần override effectiveMotionType — dùng trực tiếp row.MotionType.
                 string effectiveMotionType = row.MotionType;
-                bool hasZ = Math.Abs(row.EndZ) > 1e-9;
                 bool isRapid3 = row.MotionType.Contains("Rapid3");
-                if (isRapid3)
-                {
-                    // Rapid3 đã có "rapid3" trong tên → BuildPositioningIdentifierWord tự chọn Da.2=0x15
-                    // Không cần thay thế thêm
-                    hasAnyZ = true; // Rapid3 luôn ghi vào Axis 3 buffer
-                }
-                else if (hasZ && (row.MotionType.Contains("Line") || row.MotionType.Contains("Rapid")))
-                {
-                    effectiveMotionType = row.MotionType.Replace("Line", "Linear3");
+                bool isLinear3 = row.MotionType.Contains("Linear3");
+                bool is3Axis = isRapid3 || isLinear3;
+
+                if (is3Axis)
                     hasAnyZ = true;
-                }
+
                 short moveCode = BuildPositioningIdentifierWord(effectiveMotionType);
                 bulkData[blockOffset + OffsetMoveCode] = moveCode;
 
@@ -650,8 +734,8 @@ namespace DACDT_2026
                 }
 
                 // 7. Axis 3 (Z) — Da.1+Da.2 + Da.6 position
-                // Rapid3 luôn ghi Z (kể cả Z=0). Line có Z ≠ 0 mới ghi.
-                if (isRapid3 || hasZ)
+                // Chỉ ghi Z buffer khi dòng là 3-axis (Linear3 hoặc Rapid3)
+                if (is3Axis)
                 {
                     // Da.1+Da.2 phải khớp với master
                     short zMoveCode = BuildPositioningIdentifierWord(effectiveMotionType);
@@ -766,7 +850,7 @@ namespace DACDT_2026
         /// <summary>
         /// Write slave axis (Y) positioning data using a single bulk WriteBuffer call.
         /// Ghi Da.1 (operation pattern) và Da.2 (control system) đồng bộ với master axis.
-        /// Với dòng có Z: Da.2 = 0x0B (ABS_Linear3). Không có Z: Da.2 = 0x0A (ABS_Linear2).
+        /// MotionType đã được post-process đúng — dùng trực tiếp.
         /// </summary>
         public static SendResult WriteSlaveAxisDataBulk(PLCCommunication plcComm, List<PositioningDataRow> rows, int slaveBaseG = 8000)
         {
@@ -794,15 +878,8 @@ namespace DACDT_2026
                 int blockOffset = i * Stride;
                 var row = rows[i];
 
-                // Da.1 + Da.2: phải khớp với master axis
-                // Rapid3 → Linear3 (Da.2=0x15). Line có Z → Linear3. Còn lại → MotionType gốc.
-                bool hasZ = Math.Abs(row.EndZ) > 1e-9;
-                bool isRapid3 = row.MotionType.Contains("Rapid3");
-                string effectiveMotionType = row.MotionType;
-                if (!isRapid3 && hasZ && (row.MotionType.Contains("Line") || row.MotionType.Contains("Rapid")))
-                    effectiveMotionType = row.MotionType.Replace("Line", "Linear3");
-
-                short moveCode = BuildPositioningIdentifierWord(effectiveMotionType);
+                // Da.1 + Da.2: dùng trực tiếp từ MotionType (đã được post-process đúng)
+                short moveCode = BuildPositioningIdentifierWord(row.MotionType);
                 bulkData[blockOffset + OffsetMoveCode] = moveCode;
 
                 // Da.6 Positioning address Y (32-bit) — offset 6 & 7
