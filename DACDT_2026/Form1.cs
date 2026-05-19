@@ -94,6 +94,12 @@ namespace DACDT_2026
         private string rapidSpeed  = "10000"; // Tốc độ G00 — cài đặt từ Settings tab
         private double offsetX = 0.0;
         private double offsetY = 0.0;
+        private double workspaceWidth  = 170.0; // Kích thước không gian làm việc X (mm)
+        private double workspaceHeight = 170.0; // Kích thước không gian làm việc Y (mm)
+        // G54-G59 Work Coordinate System offsets (chỉ áp dụng cho G-code)
+        private string activeWcs = "G54";
+        private readonly double[] wcsOffsetX = new double[6]; // G54=0, G55=1, ..., G59=5
+        private readonly double[] wcsOffsetY = new double[6];
         private string rawGcodeText = string.Empty;
 
         // UI state
@@ -137,6 +143,90 @@ namespace DACDT_2026
             plcPollTimer.Tick    += PlcPollTimer_Tick;
 
             Shown += async (sender, e) => await InitializeWebViewAsync();
+
+            // Load settings từ file text
+            LoadSettingsFromFile();
+        }
+
+        // ── Settings persistence ─────────────────────────────────────────────────
+        private static string SettingsFilePath =>
+            Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "app_settings.txt");
+
+        private void LoadSettingsFromFile()
+        {
+            try
+            {
+                string path = SettingsFilePath;
+                if (!File.Exists(path)) return;
+
+                foreach (string line in File.ReadAllLines(path))
+                {
+                    if (string.IsNullOrWhiteSpace(line) || line.StartsWith("#")) continue;
+                    int eq = line.IndexOf('=');
+                    if (eq < 0) continue;
+                    string key = line.Substring(0, eq).Trim();
+                    string val = line.Substring(eq + 1).Trim();
+
+                    switch (key)
+                    {
+                        case "rapidSpeed": rapidSpeed = val; break;
+                        case "globalSpeed": globalSpeed = val; break;
+                        case "workspaceWidth": double.TryParse(val, NumberStyles.Any, CultureInfo.InvariantCulture, out workspaceWidth); break;
+                        case "workspaceHeight": double.TryParse(val, NumberStyles.Any, CultureInfo.InvariantCulture, out workspaceHeight); break;
+                        case "offsetX": double.TryParse(val, NumberStyles.Any, CultureInfo.InvariantCulture, out offsetX); break;
+                        case "offsetY": double.TryParse(val, NumberStyles.Any, CultureInfo.InvariantCulture, out offsetY); break;
+                        case "plcIpAddress": plcIpAddress = val; break;
+                        case "plcPort": int.TryParse(val, out plcPort); break;
+                        case "logicalStation": int.TryParse(val, out logicalStation); break;
+                        case "globalZStart": globalZStart = val; break;
+                        case "globalZDown": globalZDown = val; break;
+                        case "globalZSafe": globalZSafe = val; break;
+                        case "activeWcs": activeWcs = val; break;
+                        default:
+                            // WCS offsets: wcsG54X, wcsG54Y, wcsG55X, ...
+                            for (int i = 0; i < 6; i++)
+                            {
+                                string gName = "G5" + (4 + i);
+                                if (key == "wcs" + gName + "X") { double.TryParse(val, NumberStyles.Any, CultureInfo.InvariantCulture, out wcsOffsetX[i]); break; }
+                                if (key == "wcs" + gName + "Y") { double.TryParse(val, NumberStyles.Any, CultureInfo.InvariantCulture, out wcsOffsetY[i]); break; }
+                            }
+                            break;
+                    }
+                }
+            }
+            catch { /* ignore load errors */ }
+        }
+
+        private void SaveSettingsToFile()
+        {
+            try
+            {
+                var lines = new List<string>
+                {
+                    "# DACDT_2026 Settings",
+                    $"rapidSpeed={rapidSpeed}",
+                    $"globalSpeed={globalSpeed}",
+                    $"workspaceWidth={workspaceWidth.ToString("0.###", CultureInfo.InvariantCulture)}",
+                    $"workspaceHeight={workspaceHeight.ToString("0.###", CultureInfo.InvariantCulture)}",
+                    $"offsetX={offsetX.ToString("0.###", CultureInfo.InvariantCulture)}",
+                    $"offsetY={offsetY.ToString("0.###", CultureInfo.InvariantCulture)}",
+                    $"plcIpAddress={plcIpAddress}",
+                    $"plcPort={plcPort}",
+                    $"logicalStation={logicalStation}",
+                    $"globalZStart={globalZStart}",
+                    $"globalZDown={globalZDown}",
+                    $"globalZSafe={globalZSafe}",
+                    $"activeWcs={activeWcs}",
+                };
+                for (int i = 0; i < 6; i++)
+                {
+                    string gName = "G5" + (4 + i);
+                    lines.Add($"wcs{gName}X={wcsOffsetX[i].ToString("0.###", CultureInfo.InvariantCulture)}");
+                    lines.Add($"wcs{gName}Y={wcsOffsetY[i].ToString("0.###", CultureInfo.InvariantCulture)}");
+                }
+                File.WriteAllLines(SettingsFilePath, lines);
+            }
+            catch { /* ignore save errors */ }
         }
 
         // ── WebView2 initialization ───────────────────────────────────────────────

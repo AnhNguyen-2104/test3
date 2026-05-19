@@ -244,16 +244,6 @@ function bindEvents() {
       post("newGcode");
     });
   }
-  const setSpeedBtn = document.getElementById("set-speed-btn");
-  if (setSpeedBtn) {
-    setSpeedBtn.addEventListener("click", () => {
-      const spdInput = document.getElementById("global-speed-input");
-      if (spdInput) {
-        post("setProcessValue", { key: "speed", value: spdInput.value });
-      }
-    });
-  }
-
   dom.assignButtons.forEach(b => b.addEventListener("click", () => {
     if (!state.dxf.selectedPointKey) { showToast("info", "DXF", "Please select a point before assigning."); return; }
     post("assignPoint", { slot: b.dataset.assignSlot, key: state.dxf.selectedPointKey });
@@ -350,6 +340,12 @@ function bindEvents() {
       const x = parseFloat(dom.offsetXInput ? dom.offsetXInput.value : 0) || 0;
       const y = parseFloat(dom.offsetYInput ? dom.offsetYInput.value : 0) || 0;
       post("setOffset", { x, y });
+      const spdInput = document.getElementById("global-speed-input");
+      if (spdInput) {
+        post("setProcessValue", { key: "speed", value: spdInput.value });
+      }
+      const st = document.getElementById("offset-status");
+      if (st) { st.textContent = "✓ X=" + x + " Y=" + y + " Speed=" + (spdInput ? spdInput.value : ""); setTimeout(() => { st.textContent = ""; }, 3000); }
     });
   }
   if (dom.clearLogsButton) dom.clearLogsButton.addEventListener("click", () => post("clearLogs"));
@@ -377,30 +373,26 @@ function bindEvents() {
     });
   }
 
-  const plcConnBtn = document.getElementById("set-plc-conn-btn");
-  if (plcConnBtn) {
-    plcConnBtn.addEventListener("click", () => {
-      const ip   = (document.getElementById("plc-ip-input")   || {}).value || "";
-      const port = parseInt((document.getElementById("plc-port-input") || {}).value, 10) || 3000;
-      if (!ip) return;
-      post("setPlcConnection", { ip, port });
-      const st = document.getElementById("plc-conn-status");
-      if (st) { st.textContent = "✓ Đã lưu — kết nối lại để áp dụng"; setTimeout(() => { st.textContent = ""; }, 4000); }
+  const workspaceBtn = document.getElementById("set-workspace-btn");
+  if (workspaceBtn) {
+    workspaceBtn.addEventListener("click", () => {
+      const w = parseFloat((document.getElementById("workspace-width-input") || {}).value) || 170;
+      const h = parseFloat((document.getElementById("workspace-height-input") || {}).value) || 170;
+      post("setWorkspace", { width: w, height: h });
+      const st = document.getElementById("workspace-status");
+      if (st) { st.textContent = "✓ " + w + " × " + h + " mm"; setTimeout(() => { st.textContent = ""; }, 3000); }
     });
   }
 
-  const zOffsetsBtn = document.getElementById("set-z-offsets-btn");
-  if (zOffsetsBtn) {
-    zOffsetsBtn.addEventListener("click", () => {
-      const zStart = parseFloat((document.getElementById("z-start-input") || {}).value) || 0;
-      const zDown  = parseFloat((document.getElementById("z-down-input")  || {}).value) || 0;
-      const zSafe  = parseFloat((document.getElementById("z-safe-input")  || {}).value) || 5;
-      // Gửi từng key qua setProcessValue (đồng nhất với cách đã có)
-      post("setProcessValue", { key: "zStart", value: String(zStart) });
-      post("setProcessValue", { key: "zDown",  value: String(zDown)  });
-      post("setProcessValue", { key: "zSafe",  value: String(zSafe)  });
-      const st = document.getElementById("z-offsets-status");
-      if (st) { st.textContent = "✓ Z Start=" + zStart + " Z Down=" + zDown + " Z Safe=" + zSafe; setTimeout(() => { st.textContent = ""; }, 3000); }
+  const wcsBtn = document.getElementById("set-wcs-btn");
+  if (wcsBtn) {
+    wcsBtn.addEventListener("click", () => {
+      const wcs = (document.getElementById("wcs-select") || {}).value || "G54";
+      const ox = parseFloat((document.getElementById("wcs-offset-x") || {}).value) || 0;
+      const oy = parseFloat((document.getElementById("wcs-offset-y") || {}).value) || 0;
+      post("setWcsOffset", { wcs, x: ox, y: oy });
+      const st = document.getElementById("wcs-status");
+      if (st) { st.textContent = "✓ " + wcs + " X=" + ox + " Y=" + oy; setTimeout(() => { st.textContent = ""; }, 3000); }
     });
   }
 }
@@ -544,9 +536,6 @@ function addLocalEvent(kind, title, message) {
 function renderDxf() {
   syncInputValue(dom.cadPath, state.dxf.filePath || "");
   syncInputValue(dom.cadFile, state.dxf.fileName || "");
-  // Sync offset and speed inputs from backend state
-  if (dom.offsetXInput) syncInputValue(dom.offsetXInput, state.dxf.offsetX != null ? String(state.dxf.offsetX) : "0");
-  if (dom.offsetYInput) syncInputValue(dom.offsetYInput, state.dxf.offsetY != null ? String(state.dxf.offsetY) : "0");
   const speedInput = document.getElementById("global-speed-input");
   if (speedInput && state.dxf.globalSpeed) syncInputValue(speedInput, state.dxf.globalSpeed);
 
@@ -593,10 +582,6 @@ function renderDxf() {
   }
 
   renderPointsTable(); renderProcessTable(); renderCadPreview(); updateNavState();
-  // Trigger 3D view update if loaded
-  if (window.cad3d && typeof window.cad3d.update3DScene === 'function') {
-    window.cad3d.update3DScene();
-  }
 }
 
 function renderPointsTable() {
@@ -697,19 +682,24 @@ function renderCadPreview() {
 
   let zProfileSvg = "";
 
+  const wsW = state.dxf.workspaceWidth || 170;
+  const wsH = state.dxf.workspaceHeight || 170;
   const p0 = proj({ x: 0, y: 0 });
-  const px = proj({ x: 170, y: 0 });
-  const py = proj({ x: 0, y: 170 });
-  const pxy = proj({ x: 170, y: 170 });
+  const px = proj({ x: wsW, y: 0 });
+  const py = proj({ x: 0, y: wsH });
+  const pxy = proj({ x: wsW, y: wsH });
+  const pxArrow = proj({ x: 20, y: 0 });
+  const pyArrow = proj({ x: 0, y: 20 });
 
   const originMarker = `<g class="cad-workspace-limit">
     <polygon points="${p0.x.toFixed(2)},${p0.y.toFixed(2)} ${px.x.toFixed(2)},${px.y.toFixed(2)} ${pxy.x.toFixed(2)},${pxy.y.toFixed(2)} ${py.x.toFixed(2)},${py.y.toFixed(2)}" fill="rgba(255, 255, 255, 0.05)" stroke="rgba(50, 200, 255, 0.5)" stroke-width="1.5" stroke-dasharray="6,4" />
-    <line x1="-10000" y1="${p0.y.toFixed(2)}" x2="10000" y2="${p0.y.toFixed(2)}" stroke="rgba(255, 50, 50, 0.4)" stroke-width="1.5" stroke-dasharray="6,4" />
-    <line x1="${p0.x.toFixed(2)}" y1="-10000" x2="${p0.x.toFixed(2)}" y2="10000" stroke="rgba(50, 255, 50, 0.4)" stroke-width="1.5" stroke-dasharray="6,4" />
-    <polygon points="${px.x.toFixed(2)},${px.y.toFixed(2)} ${(px.x - 10).toFixed(2)},${(px.y - 5).toFixed(2)} ${(px.x - 10).toFixed(2)},${(px.y + 5).toFixed(2)}" fill="rgba(255, 50, 50, 0.8)" />
-    <polygon points="${py.x.toFixed(2)},${py.y.toFixed(2)} ${(py.x - 5).toFixed(2)},${(py.y + 10).toFixed(2)} ${(py.x + 5).toFixed(2)},${(py.y + 10).toFixed(2)}" fill="rgba(50, 255, 50, 0.8)" />
-    <circle cx="${p0.x.toFixed(2)}" cy="${p0.y.toFixed(2)}" r="5" fill="none" stroke="yellow" stroke-width="2"/>
-    <text x="${p0.x + 8}" y="${p0.y - 8}" fill="yellow" font-size="12" font-family="monospace">X0, Y0</text>
+    <line x1="${p0.x.toFixed(2)}" y1="${p0.y.toFixed(2)}" x2="${pxArrow.x.toFixed(2)}" y2="${pxArrow.y.toFixed(2)}" stroke="rgba(255, 50, 50, 0.9)" stroke-width="2.5" />
+    <polygon points="${pxArrow.x.toFixed(2)},${pxArrow.y.toFixed(2)} ${(pxArrow.x - 12).toFixed(2)},${(pxArrow.y - 6).toFixed(2)} ${(pxArrow.x - 12).toFixed(2)},${(pxArrow.y + 6).toFixed(2)}" fill="rgba(255, 50, 50, 0.9)" />
+    <text x="${(pxArrow.x + 6).toFixed(2)}" y="${(pxArrow.y + 5).toFixed(2)}" fill="rgba(255, 50, 50, 0.9)" font-size="15" font-weight="bold" font-family="monospace">X</text>
+    <line x1="${p0.x.toFixed(2)}" y1="${p0.y.toFixed(2)}" x2="${pyArrow.x.toFixed(2)}" y2="${pyArrow.y.toFixed(2)}" stroke="rgba(50, 255, 50, 0.9)" stroke-width="2.5" />
+    <polygon points="${pyArrow.x.toFixed(2)},${pyArrow.y.toFixed(2)} ${(pyArrow.x - 6).toFixed(2)},${(pyArrow.y + 12).toFixed(2)} ${(pyArrow.x + 6).toFixed(2)},${(pyArrow.y + 12).toFixed(2)}" fill="rgba(50, 255, 50, 0.9)" />
+    <text x="${(pyArrow.x + 8).toFixed(2)}" y="${(pyArrow.y + 5).toFixed(2)}" fill="rgba(50, 255, 50, 0.9)" font-size="15" font-weight="bold" font-family="monospace">Y</text>
+    <circle cx="${p0.x.toFixed(2)}" cy="${p0.y.toFixed(2)}" r="5" fill="none" stroke="yellow" stroke-width="2.5"/>
   </g>`;
 
   dom.cadPreview.innerHTML = `<g id="cad-transform-group" transform="translate(${cadPanX},${cadPanY}) scale(${cadZoom})">${originMarker}<g>${polyM}</g><g>${ptM}</g><g>${aM}</g></g>${zProfileSvg}`;

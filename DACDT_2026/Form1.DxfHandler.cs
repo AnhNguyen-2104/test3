@@ -334,6 +334,7 @@ namespace DACDT_2026
 
             UpdateGcodeFromProcessTable();
             await PushDxfStateAsync();
+            SaveSettingsToFile();
             await NotifyAsync("success", "Configuration", $"Updated {key} = {value}");
         }
 
@@ -504,6 +505,28 @@ namespace DACDT_2026
             string lastSpeed = globalSpeed; // fallback to globalSpeed if no F at all
             string snapRapid = rapidSpeed;  // snapshot rapidSpeed cho G0
 
+            // Xác định offset áp dụng:
+            // - G-code: dùng WCS offset (G54-G59) active
+            // - DXF: dùng offset X/Y từ toolbar
+            bool isGcodeFile = string.Equals(activeDocumentKind, "GCODE", StringComparison.OrdinalIgnoreCase);
+            double sendOffsetX, sendOffsetY;
+            if (isGcodeFile)
+            {
+                int wcsIdx = 0;
+                if (activeWcs == "G55") wcsIdx = 1;
+                else if (activeWcs == "G56") wcsIdx = 2;
+                else if (activeWcs == "G57") wcsIdx = 3;
+                else if (activeWcs == "G58") wcsIdx = 4;
+                else if (activeWcs == "G59") wcsIdx = 5;
+                sendOffsetX = wcsOffsetX[wcsIdx];
+                sendOffsetY = wcsOffsetY[wcsIdx];
+            }
+            else
+            {
+                sendOffsetX = offsetX;
+                sendOffsetY = offsetY;
+            }
+
             foreach (var row in processRows)
             {
                 // Xác định speed thực sự gửi xuống PLC
@@ -531,8 +554,8 @@ namespace DACDT_2026
                     MCodeValue       = row.MCodeValue,
                     Dwell            = row.Dwell,
                     Speed            = sendSpeed,
-                    EndCoordinate    = ApplyOffsetToCoordSend(row.EndCoordinate,    offsetX, offsetY),
-                    CenterCoordinate = ApplyOffsetToCoordSend(row.CenterCoordinate, offsetX, offsetY),
+                    EndCoordinate    = ApplyOffsetToCoordSend(row.EndCoordinate,    sendOffsetX, sendOffsetY),
+                    CenterCoordinate = ApplyOffsetToCoordSend(row.CenterCoordinate, sendOffsetX, sendOffsetY),
                     EndZ             = row.EndZ
                 });
             }
@@ -794,7 +817,7 @@ namespace DACDT_2026
                             EndCoordinate    = string.Format(CultureInfo.InvariantCulture,
                                 "{0:0.###};{1:0.###}", startPt.X, startPt.Y),
                             CenterCoordinate = string.Empty,
-                            MCodeValue       = string.Empty, // Không dùng MCode
+                            MCodeValue       = "3", // M3 = bắt đầu quỹ đạo (dispensing ON)
                             EndZ             = startZ
                         };
                         ApplyPrimitiveExtraData(startRow, prim, isGcode: false);
@@ -810,17 +833,12 @@ namespace DACDT_2026
                             string currentSuffix = (isLastInPrim && isLastInPath) ? suffix : " (Continuous Path)";
                             var pt = prim.Points[i];
 
-                            // Xác định Z:
-                            //   - Điểm cuối path (trước khi nhảy sang path mới): Z = zSafe (nhấc lên)
-                            //   - Điểm cuối path cuối cùng: Z = zDown (kết thúc ở độ sâu gia công)
-                            //   - Điểm giữa path: Z = zDown (đang gia công)
                             double endZ;
                             if (isLastInPrim && isLastInPath && !isLastPath)
-                                endZ = zSafe; // Nhấc lên trước khi nhảy sang path mới
+                                endZ = zSafe;
                             else
-                                endZ = zDown; // Gia công hoặc kết thúc
+                                endZ = zDown;
 
-                            // File có Z → Linear3, không Z → Line
                             string motionPrefix = hasZ ? "Linear3" : "Line";
 
                             var row = new ProcessRow
@@ -829,20 +847,21 @@ namespace DACDT_2026
                                 EndCoordinate    = string.Format(CultureInfo.InvariantCulture,
                                     "{0:0.###};{1:0.###}", pt.X, pt.Y),
                                 CenterCoordinate = string.Empty,
-                                MCodeValue       = string.Empty, // Không dùng MCode
+                                MCodeValue       = string.Empty,
                                 EndZ             = endZ
                             };
                             ApplyPrimitiveExtraData(row, prim, isGcode: false);
+
+                            // M4 = kết thúc quỹ đạo (dispensing OFF) tại điểm cuối path
+                            if (isLastInPrim && isLastInPath)
+                                row.MCodeValue = "4";
+
                             result.Add(row);
                         }
                     }
                     // Xử lý Arc/Circle
                     else if (prim.SourceType.Contains("Arc") || prim.SourceType.Contains("Circle"))
                     {
-                        // Nếu file có Z → dùng Helical (3-axis Arc) thay vì Arc 2-axis
-                        // để giữ Arc thành 1 dòng (không nổ thành chuỗi Linear3 → tránh vượt 600 điểm).
-                        // Da.2: 0x22=ABS_HelicalRight (CW), 0x23=ABS_HelicalLeft (CCW)
-                        // Nếu file không Z → dùng Arc 2-axis với center point.
                         string arcType;
                         if (hasZ)
                             arcType = prim.IsCw ? "Helical CW" : "Helical CCW";
@@ -853,7 +872,6 @@ namespace DACDT_2026
                         }
 
                         var endPt = prim.Points.Last();
-                        // Z điểm cuối: nếu là điểm cuối path trung gian → zSafe (nhấc lên), còn lại zDown
                         double endZ = (isLastInPath && !isLastPath) ? zSafe : zDown;
 
                         var row = new ProcessRow
@@ -868,6 +886,11 @@ namespace DACDT_2026
                             row.CenterCoordinate = string.Format(CultureInfo.InvariantCulture,
                                 "{0:0.###};{1:0.###}", prim.Center.X, prim.Center.Y);
                         ApplyPrimitiveExtraData(row, prim, isGcode: false);
+
+                        // M4 = kết thúc quỹ đạo (dispensing OFF) tại điểm cuối path
+                        if (isLastInPath)
+                            row.MCodeValue = "4";
+
                         result.Add(row);
                     }
                 }

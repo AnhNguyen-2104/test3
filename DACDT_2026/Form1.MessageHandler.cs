@@ -113,6 +113,7 @@ namespace DACDT_2026
                     case "setOffset":
                         offsetX = GetDouble(payload, "x", offsetX);
                         offsetY = GetDouble(payload, "y", offsetY);
+                        SaveSettingsToFile();
                         await PushDxfStateAsync();
                         await HandleScanLimitsAsync();
                         break;
@@ -176,6 +177,44 @@ namespace DACDT_2026
 
                     case "clearBuffer":
                         await HandleClearBufferAsync();
+                        break;
+
+                    // ── Settings ─────────────────────────────────────────────────
+                    case "setG0Speed":
+                        rapidSpeed = GetInt(payload, "value", 10000).ToString();
+                        SaveSettingsToFile();
+                        break;
+
+                    case "setPlcConnection":
+                        plcIpAddress = GetString(payload, "ip");
+                        plcPort = GetInt(payload, "port", 3000);
+                        SaveSettingsToFile();
+                        break;
+
+                    case "setWorkspace":
+                        workspaceWidth = GetDouble(payload, "width", workspaceWidth);
+                        workspaceHeight = GetDouble(payload, "height", workspaceHeight);
+                        SaveSettingsToFile();
+                        await PushDxfStateAsync();
+                        break;
+
+                    case "setWcsOffset":
+                        {
+                            string wcs = GetString(payload, "wcs");
+                            double wx = GetDouble(payload, "x", 0);
+                            double wy = GetDouble(payload, "y", 0);
+                            int wcsIdx = 0;
+                            if (wcs == "G55") wcsIdx = 1;
+                            else if (wcs == "G56") wcsIdx = 2;
+                            else if (wcs == "G57") wcsIdx = 3;
+                            else if (wcs == "G58") wcsIdx = 4;
+                            else if (wcs == "G59") wcsIdx = 5;
+                            activeWcs = wcs;
+                            wcsOffsetX[wcsIdx] = wx;
+                            wcsOffsetY[wcsIdx] = wy;
+                            SaveSettingsToFile();
+                            await NotifyAsync("success", "WCS", $"{wcs} offset X={wx} Y={wy}");
+                        }
                         break;
 
                     // ── Log ─────────────────────────────────────────────────────

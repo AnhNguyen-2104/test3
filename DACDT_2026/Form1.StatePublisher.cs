@@ -200,6 +200,8 @@ namespace DACDT_2026
                     globalSpeed = snapSpeed,
                     offsetX  = snapOx,
                     offsetY  = snapOy,
+                    workspaceWidth  = workspaceWidth,
+                    workspaceHeight = workspaceHeight,
                     bounds   = boundsObj,
                     primitives       = primList,
                     points           = ptList,

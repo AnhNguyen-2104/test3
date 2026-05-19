@@ -7,34 +7,38 @@ inclusion: auto
 Khi sửa code liên quan đến G-code parsing, process table, hoặc buffer write PLC, PHẢI tuân thủ:
 
 ## Tài liệu tham chiếu bắt buộc
-- #[[GCODE_TO_PLC_POSITIONING_RULES.md]] — Bảng mã identifier đầy đủ + ví dụ
+- #[[GCODE_TO_PLC_POSITIONING_RULES.md]] — Bảng mã identifier + ví dụ đầy đủ
 - File CSV chuẩn: `E:\D\NEW\melsec_q_abs_identifier.csv`
 
-## Quy tắc cốt lõi
+## Quy tắc cốt lõi (chương trình hiện tại)
 
-1. **G02/G03 LUÔN là 2-axis Circular** (Da.2 = 0x0F CW / 0x10 CCW). KHÔNG BAO GIỜ dùng Helical, KHÔNG chia thành nhiều đoạn Linear. Gửi 1 dòng duy nhất với tọa độ đích + tọa độ tâm cung.
+1. **TẤT CẢ G0/G1/G2/G3 đều là nội suy 2 trục (X-Y). Z bị bỏ qua hoàn toàn.**
+   - G00/G01 → Da.2 = 0x0A (ABS Linear 2-axis)
+   - G02 → Da.2 = 0x0F (ABS Circular CW)
+   - G03 → Da.2 = 0x10 (ABS Circular CCW)
 
-2. **Per-line Z detection** — KHÔNG pre-scan toàn file:
-   - G0/G1 có Z thay đổi (Z lệnh này ≠ Z lệnh trước) → 3-axis (Da.2 = 0x15)
-   - G0/G1 không có Z thay đổi (Z modal giữ nguyên) → 2-axis (Da.2 = 0x0A)
-   - G02/G03 → luôn 2-axis Circular (0x0F/0x10)
+2. **G02/G03 gửi 1 dòng duy nhất** với tọa độ đích + tọa độ tâm cung ABS. KHÔNG chia thành nhiều đoạn Linear.
 
-3. **Da.5 LUÔN = Axis2** (giá trị 1, bit 3-2 = 01) cho tất cả loại nội suy.
+3. **Da.5 LUÔN = Axis2** (giá trị 1, bit 3-2 = 01).
 
-4. **Da.1 (Operation Pattern) — QUY TẮC LỖI 524:**
-   - Chuyển 2↔3 axis (số trục thay đổi) → dòng trước PHẢI là **End (Da.1 = 0)** — bắt buộc, nếu không sẽ lỗi 524
-   - Chuyển Da.2 cùng số trục (Line↔Arc, đều 2-axis) → Continuous Positioning (Da.1 = 1)
-   - Da.2 giống nhau liên tiếp → Continuous Path (Da.1 = 3)
+4. **Da.1 (Operation Pattern):**
+   - Chuyển Line↔Arc → Continuous Positioning (Da.1 = 1)
+   - Cùng Da.2 liên tiếp → Continuous Path (Da.1 = 3)
    - Dòng cuối → End (Da.1 = 0)
 
-5. **Lệnh đầu tiên** (thường G00) KHÔNG được skip bởi parser. Phải tạo primitive di chuyển từ gốc (0,0,0).
+5. **Không có lỗi 524** vì tất cả đều 2-axis, không chuyển 2↔3 axis.
 
-6. **Giá trị identifier chuẩn** (verify bằng CSV):
+6. **Giá trị identifier chuẩn:**
    - Linear 2-axis End = 2564 (0x0A04)
    - Linear 2-axis Cont.Pos = 2565 (0x0A05)
    - Linear 2-axis Cont.Path = 2567 (0x0A07)
-   - Linear 3-axis Cont.Pos = 5381 (0x1505)
    - Circular CW Cont.Pos = 3845 (0x0F05)
    - Circular CCW Cont.Pos = 4101 (0x1005)
 
-7. **Tọa độ tâm cung** là ABS (tuyệt đối): centerX = startX + I, centerY = startY + J
+7. **Tọa độ tâm cung** là ABS: centerX = startX + I, centerY = startY + J.
+
+8. **M code KHÔNG modal** — chỉ áp dụng cho dòng có M, hoặc gán vào dòng trước nếu M đứng riêng.
+
+9. **Lệnh đầu tiên** KHÔNG được skip — parser tạo primitive từ gốc (0,0).
+
+10. **Tọa độ** ×10000. **Speed** ×100.
