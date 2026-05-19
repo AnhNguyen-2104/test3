@@ -98,6 +98,7 @@ namespace DACDT_2026
         private double workspaceHeight = 170.0; // Kích thước không gian làm việc Y (mm)
         private string globalDwellM3 = "100"; // Dwell time (ms) cho M03 (bắt đầu dispensing)
         private string globalDwellM4 = "100"; // Dwell time (ms) cho M04 (kết thúc dispensing)
+        private string memberPassword = ""; // Mật khẩu thành viên (admin tạo)
         // G54-G59 Work Coordinate System offsets (chỉ áp dụng cho G-code)
         private string activeWcs = "G54";
         private readonly double[] wcsOffsetX = new double[6]; // G54=0, G55=1, ..., G59=5
@@ -127,6 +128,7 @@ namespace DACDT_2026
             StartPosition = FormStartPosition.CenterScreen;
             MinimumSize   = new Size(1440, 860);
             WindowState   = FormWindowState.Maximized;
+            FormBorderStyle = FormBorderStyle.None;
             BackColor     = Color.FromArgb(10, 15, 30);
 
             webView = new WebView2
@@ -185,6 +187,7 @@ namespace DACDT_2026
                         case "globalZSafe": globalZSafe = val; break;
                         case "globalDwellM3": globalDwellM3 = val; break;
                         case "globalDwellM4": globalDwellM4 = val; break;
+                        case "memberPassword": memberPassword = val; break;
                         case "activeWcs": activeWcs = val; break;
                         default:
                             // WCS offsets: wcsG54X, wcsG54Y, wcsG55X, ...
@@ -222,6 +225,7 @@ namespace DACDT_2026
                     $"globalZSafe={globalZSafe}",
                     $"globalDwellM3={globalDwellM3}",
                     $"globalDwellM4={globalDwellM4}",
+                    $"memberPassword={memberPassword}",
                     $"activeWcs={activeWcs}",
                 };
                 for (int i = 0; i < 6; i++)

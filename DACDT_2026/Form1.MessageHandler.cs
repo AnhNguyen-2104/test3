@@ -222,6 +222,11 @@ namespace DACDT_2026
                     case "clearLogs":
                         await HandleClearLogsAsync();
                         break;
+
+                    case "exitApp":
+                        isClosing = true;
+                        this.BeginInvoke(new System.Action(() => System.Windows.Forms.Application.Exit()));
+                        break;
                 }
             }
             catch (System.Exception ex)

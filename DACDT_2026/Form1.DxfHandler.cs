@@ -355,6 +355,10 @@ namespace DACDT_2026
                         row.Dwell = value;
                 }
             }
+            else if (string.Equals(key, "memberPassword", StringComparison.OrdinalIgnoreCase))
+            {
+                memberPassword = value;
+            }
             else if (string.Equals(key, "zDown", StringComparison.OrdinalIgnoreCase))
             {
                 globalZDown = value;

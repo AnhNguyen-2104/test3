@@ -217,6 +217,7 @@ namespace DACDT_2026
                     workspaceWidth  = workspaceWidth,
                     workspaceHeight = workspaceHeight,
                     activeWcs = activeWcs,
+                    memberPassword = memberPassword,
                     wcsOffsets = new {
                         G54 = new { x = wcsOffsetX[0], y = wcsOffsetY[0] },
                         G55 = new { x = wcsOffsetX[1], y = wcsOffsetY[1] },

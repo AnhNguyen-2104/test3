@@ -80,8 +80,7 @@
 
       <div class="sidebar-footer">
         <button id="emergency-stop" class="danger-button full-width">EMERGENCY STOP</button>
-        <button class="side-footer-link" data-placeholder="SUPPORT">SUPPORT</button>
-        <button class="side-footer-link" data-placeholder="LOGOUT">LOGOUT</button>
+        <button id="exit-app-btn" class="side-footer-link" style="color:#ef4444;">EXIT APP</button>
       </div>
     </aside>
 
@@ -417,6 +416,19 @@
 
           <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border);font-size:11px;color:var(--muted);">
             Các cài đặt được lưu vào file app_settings.txt — tự động load khi mở app.
+          </div>
+
+          <!-- Member Management (admin only) -->
+          <div id="member-management" style="margin-top:24px;padding-top:16px;border-top:1px solid var(--border);">
+            <div style="font-size:13px;font-weight:600;color:var(--text-main);margin-bottom:4px;">Member Management</div>
+            <div style="font-size:11px;color:var(--muted);margin-bottom:10px;">
+              Tạo mật khẩu cho thành viên. Thành viên chỉ xem được Settings, không sửa Workspace Size.
+            </div>
+            <div style="display:flex;gap:8px;align-items:center;">
+              <input id="member-password-input" class="text-input" type="text" placeholder="Mật khẩu thành viên" style="width:200px;">
+              <button id="set-member-pwd-btn" class="primary-button" style="background:var(--cyan);color:#fff;">Save Member Password</button>
+              <span id="member-pwd-status" style="font-size:11px;color:var(--muted);"></span>
+            </div>
           </div>
         </div>
       </section>
