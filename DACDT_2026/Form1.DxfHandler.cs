@@ -91,27 +91,40 @@ namespace DACDT_2026
                 CadDocumentService.CadLoadResult loadedDoc = null;
                 string loadedGcodeText = string.Empty;
 
-                await Task.Run(() =>
+                // Parse file trên thread với stack size lớn hơn (tránh StackOverflow với DXF phức tạp)
+                var loadTask = new System.Threading.Tasks.TaskCompletionSource<bool>();
+                var loadThread = new System.Threading.Thread(() =>
                 {
-                    if (isGcode)
+                    try
                     {
-                        loadedGcodeText = File.ReadAllText(selectedPath);
-                        loadedDoc = gcodeCoordinateService.LoadAsCad(selectedPath);
-                    }
-                    else
-                    {
-                        loadedDoc = cadService.Load(selectedPath);
-                    }
+                        if (isGcode)
+                        {
+                            loadedGcodeText = File.ReadAllText(selectedPath);
+                            loadedDoc = gcodeCoordinateService.LoadAsCad(selectedPath);
+                        }
+                        else
+                        {
+                            loadedDoc = cadService.Load(selectedPath);
+                        }
 
-                    // Kết nối các đoạn thành path liên tục (O(n²)) — chạy nền
-                    if (loadedDoc?.Primitives != null && loadedDoc.Primitives.Count > 0)
-                    {
-                        var paths = GetConnectedPathsFromCad(loadedDoc.Primitives, isGcode);
-                        loadedDoc.Primitives.Clear();
-                        foreach (var path in paths)
-                            loadedDoc.Primitives.AddRange(path);
+                        // Kết nối các đoạn thành path liên tục — chạy nền
+                        if (loadedDoc?.Primitives != null && loadedDoc.Primitives.Count > 0)
+                        {
+                            var paths = GetConnectedPathsFromCad(loadedDoc.Primitives, isGcode);
+                            loadedDoc.Primitives.Clear();
+                            foreach (var path in paths)
+                                loadedDoc.Primitives.AddRange(path);
+                        }
+                        loadTask.SetResult(true);
                     }
-                });
+                    catch (Exception ex)
+                    {
+                        loadTask.SetException(ex);
+                    }
+                }, 8 * 1024 * 1024); // 8MB stack
+                loadThread.IsBackground = true;
+                loadThread.Start();
+                await loadTask.Task;
 
                 // ── Cập nhật state trên UI thread ────────────────────────────────
                 activeCadDocument    = loadedDoc;
@@ -138,6 +151,7 @@ namespace DACDT_2026
                 // Tự động Import và quét giới hạn
                 await HandleImportCadToProcessAsync();
                 await HandleScanLimitsAsync();
+                await PushDxfStateAsync();
             }
             catch (Exception ex)
             {
@@ -188,6 +202,7 @@ namespace DACDT_2026
                 await PushDxfStateAsync();
                 await HandleImportCadToProcessAsync();
                 await HandleScanLimitsAsync();
+                await PushDxfStateAsync();
             }
             catch
             {
@@ -1341,13 +1356,6 @@ namespace DACDT_2026
         private void InitializeProcessRows()
         {
             processRows.Clear();
-            processRows.Add(new ProcessRow { Key = "start",      MotionType = "Điểm bắt đầu" });
-            processRows.Add(new ProcessRow { Key = "glueStart",  MotionType = "Điểm bắt đầu bơm", MCodeValue = "Bật keo" });
-            processRows.Add(new ProcessRow { Key = "glueEnd",    MotionType = "Điểm kết thúc bơm", MCodeValue = "Tắt keo" });
-            processRows.Add(new ProcessRow { Key = "zStart",     MotionType = "Độ cao Z bắt đầu" });
-            processRows.Add(new ProcessRow { Key = "zDown",      MotionType = "Độ cao Z hạ" });
-            processRows.Add(new ProcessRow { Key = "zSafe",      MotionType = "Độ cao Z an toàn" });
-            processRows.Add(new ProcessRow { Key = "speed",      MotionType = "Tốc độ" });
         }
 
         private ProcessRow GetProcessRow(string key)

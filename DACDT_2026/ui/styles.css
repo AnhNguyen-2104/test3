@@ -245,7 +245,7 @@ html.theme-light .sidebar { background: #f6f8fd; }
 /* ─── Axis Monitor ─── */
 .axis-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: 1fr 1fr 1fr 1.8fr;
   gap: 12px;
 }
 
@@ -298,7 +298,7 @@ html.theme-light .sidebar { background: #f6f8fd; }
   flex: 1; overflow-y: auto;
   border: 1px solid var(--border); border-radius: var(--radius-sm);
   background: rgba(0,0,0,0.2); padding: 8px 12px;
-  font-size: 13px; color: var(--muted); min-height: 140px;
+  font-size: 13px; color: var(--muted); min-height: 140px; max-height: 280px;
 }
 .events-empty { padding: 16px; text-align: center; color: var(--muted); font-size: 12px; }
 .event-row { padding: 3px 0; border-bottom: 1px solid rgba(255,255,255,0.04); }
@@ -499,7 +499,7 @@ html.theme-light .data-table th { background: rgba(239, 244, 255, 0.98); }
 
 /* ─── Responsive ─── */
 @media (max-width: 1600px) {
-  .axis-grid { grid-template-columns: repeat(4, 1fr); gap: 10px; }
+  .axis-grid { grid-template-columns: 1fr 1fr 1fr 1.8fr; gap: 10px; }
   .dxf-grid { grid-template-columns: minmax(500px, 1fr) 380px; }
 }
 

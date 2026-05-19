@@ -252,7 +252,15 @@ function bindEvents() {
     const row = e.target.closest("[data-point-key]"); if (!row) return;
     state.dxf.selectedPointKey = row.dataset.pointKey; renderPointsTable(); renderCadPreview();
     post("selectCadPoint", { key: state.dxf.selectedPointKey });
+    // Cập nhật bảng process khi tương tác với bảng trên
+    renderProcessTable();
   });
+  // Click vào panel points hoặc gcode editor → cập nhật bảng process
+  const dxfPointsContainer = document.getElementById("dxf-points-container");
+  if (dxfPointsContainer) dxfPointsContainer.addEventListener("click", () => renderProcessTable());
+  const gcodeEditorContainer = document.getElementById("gcode-editor-container");
+  if (gcodeEditorContainer) gcodeEditorContainer.addEventListener("click", () => renderProcessTable());
+
   dom.processBody.addEventListener("change", e => {
     const input = e.target; if (input.tagName === "INPUT" && input.dataset.processIndex !== undefined)
       post("setProcessRowValue", { index: parseInt(input.dataset.processIndex, 10), field: input.dataset.processField, value: input.value.trim() });
@@ -415,7 +423,8 @@ function handleHostMessage(msg) {
       state.dxf = msg.payload || state.dxf;
       state.view = state.dxf.view || state.view;
       state.theme = state.dxf.theme || state.theme;
-      applyTheme(state.theme); applyView(state.view); renderDxf(); break;
+      applyTheme(state.theme); applyView(state.view); renderDxf();
+      break;
     case "telemetry":
       state.telemetry = msg.payload || {}; renderTelemetry(); break;
     case "logsState":
@@ -470,9 +479,9 @@ function renderControl() {
 
 
 
-  // Render 4 axes dynamically
+  // Render 3 axes + Program Monitor panel
   const axes = state.control.axes || [];
-  const accents = ['accent-axis-1', 'accent-axis-2', 'accent-axis-3', 'accent-axis-4'];
+  const accents = ['accent-axis-1', 'accent-axis-2', 'accent-axis-3'];
   const fields = [
     { key: 'currentPos', label: 'CURRENT POSITION (mm)', addrKey: 'currentPosAddr', big: true },
     { key: 'currentSpeed', label: 'CURRENT SPEED (mm/min)', addrKey: 'currentSpeedAddr', big: true },
@@ -482,11 +491,11 @@ function renderControl() {
     { key: 'axisStatus', label: 'AXIS STATUS', addrKey: 'axisStatusAddr' },
     { key: 'currentDataNo', label: 'MD.44 CURR DATA NO.', addrKey: 'currentDataNoAddr' },
     { key: 'lastDataNo', label: 'MD.46 LAST DATA NO.', addrKey: 'lastDataNoAddr' },
-
   ];
   const grid = document.getElementById('axis-grid');
   if (grid) {
-    grid.innerHTML = axes.map((a, i) => {
+    // Render 3 axis cards
+    let html = axes.slice(0, 3).map((a, i) => {
       const n = a.index || (i + 1);
       const rows = fields.map(f => {
         const val = a[f.key] || '--';
@@ -496,6 +505,56 @@ function renderControl() {
       }).join('');
       return `<div class="axis-card"><div class="axis-header ${accents[i] || ''}">AXIS ${n}</div><div class="axis-body">${rows}</div></div>`;
     }).join('');
+
+    // Program Monitor panel (thay Axis 4)
+    const processRows = state.dxf && state.dxf.processRows ? state.dxf.processRows : [];
+    const currentLine = (axes[0] && axes[0].currentDataNo && axes[0].currentDataNo !== "--") ? parseInt(axes[0].currentDataNo, 10) : 0;
+
+    // Chỉ rebuild Program Monitor khi data thay đổi (tránh reset scroll mỗi 50ms)
+    const progKey = processRows.length + '_' + currentLine;
+    const existingMonitor = document.getElementById('program-monitor-body');
+    if (!existingMonitor || existingMonitor.dataset.progKey !== progKey) {
+      let progHtml = '<div class="axis-card" style="display:flex;flex-direction:column;overflow:visible;"><div class="axis-header accent-axis-4">PROGRAM MONITOR</div><div style="padding:0;overflow-y:auto;max-height:400px;" id="program-monitor-body" data-prog-key="' + progKey + '">';
+      progHtml += '<table class="data-table compact" style="font-size:11px;margin:0;"><thead style="position:sticky;top:0;background:var(--panel-2);z-index:1;"><tr><th style="width:30px">#</th><th>Motion</th><th>End (X;Y)</th><th>M</th></tr></thead><tbody>';
+      for (let i = 0; i < processRows.length; i++) {
+        const r = processRows[i];
+        const lineNo = i + 1;
+        const isActive = lineNo === currentLine;
+        const cls = isActive ? 'style="background:rgba(34,197,94,0.25);color:#22c55e;font-weight:bold;"' : '';
+        const marker = isActive ? '▶ ' : '';
+        const endCoord = r.endCoordinateDisplay || r.endCoordinate || "";
+        progHtml += `<tr ${cls} id="prog-line-${lineNo}"><td>${marker}${lineNo}</td><td>${esc(r.motionType || "").split("(")[0].trim()}</td><td>${esc(endCoord)}</td><td>${esc(r.mCodeValue || "")}</td></tr>`;
+      }
+      if (processRows.length === 0) {
+        progHtml += '<tr><td colspan="4" style="text-align:center;color:var(--muted);padding:12px;">No program loaded</td></tr>';
+      }
+      progHtml += '</tbody></table></div></div>';
+      html += progHtml;
+      grid.innerHTML = html;
+
+      // Auto-scroll chỉ khi đang chạy (currentLine > 0)
+      if (currentLine > 0) {
+        const activeRow = document.getElementById('prog-line-' + currentLine);
+        if (activeRow) activeRow.scrollIntoView({ block: 'center', behavior: 'auto' });
+      }
+    } else {
+      // Chỉ update 3 axis cards, giữ nguyên Program Monitor (không reset scroll)
+      const axisCards = grid.querySelectorAll('.axis-card');
+      if (axisCards.length >= 3) {
+        for (let i = 0; i < 3 && i < axisCards.length; i++) {
+          const a = axes[i] || {};
+          const n = a.index || (i + 1);
+          const rowsHtml = fields.map(f => {
+            const val = a[f.key] || '--';
+            const addr = a[f.addrKey] || '';
+            const cls = f.big ? 'axis-field-value' : 'axis-field-value sm';
+            return `<div class="axis-field"><div class="axis-field-label">${esc(f.label)} <span class="axis-addr">${esc(addr)}</span></div><div class="${cls}">${esc(val)}</div></div>`;
+          }).join('');
+          const body = axisCards[i].querySelector('.axis-body');
+          if (body) body.innerHTML = rowsHtml;
+        }
+      }
+    }
   }
   renderEvents();
   updateNavState();
@@ -677,7 +736,7 @@ function renderCadPreview() {
     return `<polyline class="${cls}" points="${pa}"></polyline>`;
   }).join("");
 
-  const ptM = isGcode ? "" : points.map(p => { const pp = proj(p); const sel = p.key === state.dxf.selectedPointKey ? "is-selected" : ""; return `<circle class="cad-point ${sel}" cx="${pp.x.toFixed(2)}" cy="${pp.y.toFixed(2)}" r="4.8" data-point-key="${esc(p.key || "")}"></circle>`; }).join("");
+  const ptM = "";
   const aM = Object.entries(state.dxf.assignedPointKeys || {}).map(([slot, key]) => { const p = points.find(i => i.key === key); if (!p) return ""; const pp = proj(p); const t = getAssignmentTone(slot); return `<circle cx="${pp.x.toFixed(2)}" cy="${pp.y.toFixed(2)}" r="10.5" fill="${t.fill}" stroke="white" stroke-width="1.8"></circle><text class="cad-assignment-text" x="${pp.x.toFixed(2)}" y="${pp.y.toFixed(2)}">${t.label}</text>`; }).join("");
 
   let zProfileSvg = "";
