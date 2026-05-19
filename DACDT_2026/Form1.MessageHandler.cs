@@ -213,6 +213,7 @@ namespace DACDT_2026
                             wcsOffsetX[wcsIdx] = wx;
                             wcsOffsetY[wcsIdx] = wy;
                             SaveSettingsToFile();
+                            await PushDxfStateAsync();
                             await NotifyAsync("success", "WCS", $"{wcs} offset X={wx} Y={wy}");
                         }
                         break;

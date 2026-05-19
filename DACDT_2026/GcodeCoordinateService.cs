@@ -58,6 +58,7 @@ namespace DACDT_2026
             bool absoluteMode = true;
             bool hasCurrentPoint = false;
             int modalMotion = 1;
+            int activeWcsIndex = 0; // 0=G54, 1=G55, ..., 5=G59
             double? modalF = null;      // Modal F cho G1/G2/G3 — chỉ cập nhật khi không phải G0
             // M code KHÔNG modal: chỉ áp dụng cho dòng có M, không lan sang dòng kế tiếp.
 
@@ -107,10 +108,12 @@ namespace DACDT_2026
                     }
 
                     // G54–G59: chọn hệ tọa độ phôi (work coordinate system).
-                    // Hiện tại offset gốc phôi được set qua UI (offsetX/offsetY), nên G54–G59
-                    // chỉ skip an toàn để tránh parser hiểu nhầm là motion modal.
+                    // Lưu WCS active — offset sẽ được cộng khi gửi PLC.
                     if (frame.G.Value >= 54 && frame.G.Value <= 59)
+                    {
+                        activeWcsIndex = frame.G.Value - 54; // G54=0, G55=1, ..., G59=5
                         continue;
+                    }
 
                     if (frame.G.Value >= 0 && frame.G.Value <= 3)
                         modalMotion = frame.G.Value;
@@ -162,7 +165,8 @@ namespace DACDT_2026
                             IsCircle = false,
                             Speed = (isFirstRapid || !modalF.HasValue) ? null : modalF.Value.ToString(CultureInfo.InvariantCulture),
                             MCodeValue = lineM?.ToString(CultureInfo.InvariantCulture),
-                            Dwell = null
+                            Dwell = null,
+                            WcsIndex = activeWcsIndex
                         });
                         AddPoint(result.Points, originPoint);
                         AddPoint(result.Points, nextPoint);
@@ -178,13 +182,13 @@ namespace DACDT_2026
                 var startPoint = new CadDocumentService.CadCoordinate(currentX, currentY, currentZ);
 
                 if (isArc)
-                    AddArcPrimitive(result, frame, startPoint, nextPoint, motion == 2, unitScale, modalF, lineM, frame.P);
+                    AddArcPrimitive(result, frame, startPoint, nextPoint, motion == 2, unitScale, modalF, lineM, frame.P, activeWcsIndex);
                 else if (!AreClose(startPoint, nextPoint))
                 {
                     bool isRapid = motion == 0;
                     // G0 Rapid: không lưu speed từ file — speed sẽ được gán từ rapidSpeed khi build ProcessRow
                     double? lineSpeed = isRapid ? (double?)null : modalF;
-                    AddLinePrimitive(result, startPoint, nextPoint, isRapid, lineSpeed, lineM, frame.P);
+                    AddLinePrimitive(result, startPoint, nextPoint, isRapid, lineSpeed, lineM, frame.P, activeWcsIndex);
                 }
                 else if (lineM.HasValue && result.Primitives.Count > 0)
                 {
@@ -209,7 +213,8 @@ namespace DACDT_2026
             bool isRapid,
             double? speed = null,
             int? mcode = null,
-            double? dwell = null)
+            double? dwell = null,
+            int wcsIndex = 0)
         {
             result.Primitives.Add(new CadDocumentService.CadPrimitiveData
             {
@@ -224,7 +229,8 @@ namespace DACDT_2026
                 IsCircle = false,
                 Speed = speed?.ToString(CultureInfo.InvariantCulture),
                 MCodeValue = mcode?.ToString(CultureInfo.InvariantCulture),
-                Dwell = dwell?.ToString(CultureInfo.InvariantCulture)
+                Dwell = dwell?.ToString(CultureInfo.InvariantCulture),
+                WcsIndex = wcsIndex
             });
 
             AddPoint(result.Points, start);
@@ -240,7 +246,8 @@ namespace DACDT_2026
             double unitScale,
             double? speed = null,
             int? mcode = null,
-            double? dwell = null)
+            double? dwell = null,
+            int wcsIndex = 0)
         {
             double centerX;
             double centerY;
@@ -260,7 +267,8 @@ namespace DACDT_2026
                 IsCircle = AreClose(start, end),
                 Speed = speed?.ToString(CultureInfo.InvariantCulture),
                 MCodeValue = mcode?.ToString(CultureInfo.InvariantCulture),
-                Dwell = dwell?.ToString(CultureInfo.InvariantCulture)
+                Dwell = dwell?.ToString(CultureInfo.InvariantCulture),
+                WcsIndex = wcsIndex
             });
 
             AddPoint(result.Points, start);

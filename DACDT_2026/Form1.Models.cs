@@ -25,6 +25,7 @@ namespace DACDT_2026
             public string EndCoordinate    { get; set; }
             public string CenterCoordinate { get; set; }
             public double EndZ             { get; set; } // Z tọa độ đích (0 = không có Z)
+            public int    WcsIndex         { get; set; } // 0=G54, 1=G55, ..., 5=G59. -1=DXF
         }
 
         private sealed class TelemetryBuffer

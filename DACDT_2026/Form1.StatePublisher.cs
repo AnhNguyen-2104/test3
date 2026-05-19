@@ -122,7 +122,7 @@ namespace DACDT_2026
 
                 // Giới hạn primitives gửi lên UI: 2000 primitives, mỗi arc tối đa 12 điểm
                 const int MaxPrimitives = 2000;
-                const int MaxArcPoints  = 12; // đủ để vẽ mượt, không cần 36
+                const int MaxArcPoints  = 96; // cung tròn mượt trên UI
                 var primList = snapDoc == null
                     ? new System.Collections.Generic.List<object>()
                     : snapDoc.Primitives.Take(MaxPrimitives).Select(p =>
@@ -171,10 +171,24 @@ namespace DACDT_2026
                     }).ToList();
 
                 // Giới hạn processRows: 2000, tính offset sẵn
+                bool isGcodeKind = string.Equals(snapKind, "GCODE", StringComparison.OrdinalIgnoreCase);
                 var rowList = snapRows.Take(2000).Select(row =>
                 {
-                    string endWithOffset    = ApplyOffsetToCoord(row.EndCoordinate,    snapOx, snapOy);
-                    string centerWithOffset = ApplyOffsetToCoord(row.CenterCoordinate, snapOx, snapOy);
+                    // Xác định offset cho row: G-code dùng WCS per-row, DXF dùng offset X/Y
+                    double rowOx, rowOy;
+                    if (isGcodeKind)
+                    {
+                        int wIdx = Math.Max(0, Math.Min(5, row.WcsIndex));
+                        rowOx = wcsOffsetX[wIdx];
+                        rowOy = wcsOffsetY[wIdx];
+                    }
+                    else
+                    {
+                        rowOx = snapOx;
+                        rowOy = snapOy;
+                    }
+                    string endWithOffset    = ApplyOffsetToCoord(row.EndCoordinate,    rowOx, rowOy);
+                    string centerWithOffset = ApplyOffsetToCoord(row.CenterCoordinate, rowOx, rowOy);
                     return (object)new
                     {
                         key              = row.Key,
@@ -202,6 +216,15 @@ namespace DACDT_2026
                     offsetY  = snapOy,
                     workspaceWidth  = workspaceWidth,
                     workspaceHeight = workspaceHeight,
+                    activeWcs = activeWcs,
+                    wcsOffsets = new {
+                        G54 = new { x = wcsOffsetX[0], y = wcsOffsetY[0] },
+                        G55 = new { x = wcsOffsetX[1], y = wcsOffsetY[1] },
+                        G56 = new { x = wcsOffsetX[2], y = wcsOffsetY[2] },
+                        G57 = new { x = wcsOffsetX[3], y = wcsOffsetY[3] },
+                        G58 = new { x = wcsOffsetX[4], y = wcsOffsetY[4] },
+                        G59 = new { x = wcsOffsetX[5], y = wcsOffsetY[5] }
+                    },
                     bounds   = boundsObj,
                     primitives       = primList,
                     points           = ptList,

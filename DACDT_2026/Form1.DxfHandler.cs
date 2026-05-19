@@ -115,13 +115,19 @@ namespace DACDT_2026
                             foreach (var path in paths)
                                 loadedDoc.Primitives.AddRange(path);
                         }
-                        loadTask.SetResult(true);
+                        loadTask.TrySetResult(true);
+                    }
+                    catch (StackOverflowException)
+                    {
+                        // Không thể catch StackOverflow trong .NET — thread sẽ bị kill
+                        // Nhưng với 64MB stack, hầu hết file sẽ OK
+                        loadTask.TrySetException(new Exception("File DXF quá phức tạp — vượt giới hạn bộ nhớ stack."));
                     }
                     catch (Exception ex)
                     {
-                        loadTask.SetException(ex);
+                        loadTask.TrySetException(ex);
                     }
-                }, 8 * 1024 * 1024); // 8MB stack
+                }, 4 * 1024 * 1024); // 4MB stack
                 loadThread.IsBackground = true;
                 loadThread.Start();
                 await loadTask.Task;
@@ -166,6 +172,10 @@ namespace DACDT_2026
             selectedCadPointKey = null;
             assignedPointKeys.Clear();
             rawGcodeText = string.Empty;
+            processRows.Clear();
+            // Giải phóng bộ nhớ từ file trước
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
         }
 
         private async Task HandlePreviewGcodeAsync(string text)
@@ -322,6 +332,28 @@ namespace DACDT_2026
                 globalSpeed = value;
                 foreach (var row in processRows)
                     row.Speed = value;
+            }
+            else if (string.Equals(key, "dwell", StringComparison.OrdinalIgnoreCase))
+            {
+                // Không dùng nữa — dùng dwellM3/dwellM4 riêng
+            }
+            else if (string.Equals(key, "dwellM3", StringComparison.OrdinalIgnoreCase))
+            {
+                globalDwellM3 = value;
+                foreach (var row in processRows)
+                {
+                    if (row.MCodeValue == "3")
+                        row.Dwell = value;
+                }
+            }
+            else if (string.Equals(key, "dwellM4", StringComparison.OrdinalIgnoreCase))
+            {
+                globalDwellM4 = value;
+                foreach (var row in processRows)
+                {
+                    if (row.MCodeValue == "4")
+                        row.Dwell = value;
+                }
             }
             else if (string.Equals(key, "zDown", StringComparison.OrdinalIgnoreCase))
             {
@@ -521,29 +553,26 @@ namespace DACDT_2026
             string snapRapid = rapidSpeed;  // snapshot rapidSpeed cho G0
 
             // Xác định offset áp dụng:
-            // - G-code: dùng WCS offset (G54-G59) active
-            // - DXF: dùng offset X/Y từ toolbar
+            // - G-code: dùng WCS offset (G54-G59) per-row — mỗi row có WcsIndex riêng
+            // - DXF: dùng offset X/Y từ Settings
             bool isGcodeFile = string.Equals(activeDocumentKind, "GCODE", StringComparison.OrdinalIgnoreCase);
-            double sendOffsetX, sendOffsetY;
-            if (isGcodeFile)
-            {
-                int wcsIdx = 0;
-                if (activeWcs == "G55") wcsIdx = 1;
-                else if (activeWcs == "G56") wcsIdx = 2;
-                else if (activeWcs == "G57") wcsIdx = 3;
-                else if (activeWcs == "G58") wcsIdx = 4;
-                else if (activeWcs == "G59") wcsIdx = 5;
-                sendOffsetX = wcsOffsetX[wcsIdx];
-                sendOffsetY = wcsOffsetY[wcsIdx];
-            }
-            else
-            {
-                sendOffsetX = offsetX;
-                sendOffsetY = offsetY;
-            }
 
             foreach (var row in processRows)
             {
+                // Xác định offset cho row này
+                double sendOffsetX, sendOffsetY;
+                if (isGcodeFile)
+                {
+                    int wcsIdx = Math.Max(0, Math.Min(5, row.WcsIndex));
+                    sendOffsetX = wcsOffsetX[wcsIdx];
+                    sendOffsetY = wcsOffsetY[wcsIdx];
+                }
+                else
+                {
+                    sendOffsetX = offsetX;
+                    sendOffsetY = offsetY;
+                }
+
                 // Xác định speed thực sự gửi xuống PLC
                 string sendSpeed;
                 bool rowIsRapid = row.MotionType.Contains("Rapid3") || row.MotionType.Contains("Rapid");
@@ -971,6 +1000,31 @@ namespace DACDT_2026
                 }
             }
 
+            // ── Điểm có M code → Continuous Positioning + Dwell ──
+            // M3 (bắt đầu dispensing) và M4 (kết thúc dispensing) có dwell riêng.
+            string snapDwellM3 = globalDwellM3;
+            string snapDwellM4 = globalDwellM4;
+            for (int i = 0; i < result.Count; i++)
+            {
+                if (!string.IsNullOrEmpty(result[i].MCodeValue))
+                {
+                    // Đổi thành Continuous Positioning (dừng có tăng/giảm tốc)
+                    if (result[i].MotionType.Contains("(Continuous Path)"))
+                    {
+                        result[i].MotionType = result[i].MotionType
+                            .Replace("(Continuous Path)", "(Continuous Positioning)");
+                    }
+                    // Gán dwell riêng theo M code
+                    if (string.IsNullOrEmpty(result[i].Dwell))
+                    {
+                        if (result[i].MCodeValue == "3")
+                            result[i].Dwell = snapDwellM3;
+                        else if (result[i].MCodeValue == "4")
+                            result[i].Dwell = snapDwellM4;
+                    }
+                }
+            }
+
             return result;
         }
 
@@ -1288,6 +1342,8 @@ namespace DACDT_2026
                 row.Speed = primitive.Speed;
             if (!string.IsNullOrWhiteSpace(primitive?.Dwell))
                 row.Dwell = primitive.Dwell;
+            if (primitive != null)
+                row.WcsIndex = primitive.WcsIndex;
         }
 
         /// <summary>

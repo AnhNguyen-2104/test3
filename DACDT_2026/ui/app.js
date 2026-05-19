@@ -352,8 +352,16 @@ function bindEvents() {
       if (spdInput) {
         post("setProcessValue", { key: "speed", value: spdInput.value });
       }
+      const dwellM3 = document.getElementById("dwell-m3-input");
+      if (dwellM3) {
+        post("setProcessValue", { key: "dwellM3", value: dwellM3.value });
+      }
+      const dwellM4 = document.getElementById("dwell-m4-input");
+      if (dwellM4) {
+        post("setProcessValue", { key: "dwellM4", value: dwellM4.value });
+      }
       const st = document.getElementById("offset-status");
-      if (st) { st.textContent = "✓ X=" + x + " Y=" + y + " Speed=" + (spdInput ? spdInput.value : ""); setTimeout(() => { st.textContent = ""; }, 3000); }
+      if (st) { st.textContent = "✓ Applied"; setTimeout(() => { st.textContent = ""; }, 3000); }
     });
   }
   if (dom.clearLogsButton) dom.clearLogsButton.addEventListener("click", () => post("clearLogs"));
@@ -393,11 +401,27 @@ function bindEvents() {
   }
 
   const wcsBtn = document.getElementById("set-wcs-btn");
+  const wcsSelect = document.getElementById("wcs-select");
+  const wcsOxInput = document.getElementById("wcs-offset-x");
+  const wcsOyInput = document.getElementById("wcs-offset-y");
+
+  // Khi đổi dropdown WCS → load giá trị offset đã lưu cho WCS đó
+  if (wcsSelect) {
+    wcsSelect.addEventListener("change", () => {
+      const wcs = wcsSelect.value || "G54";
+      const wcsData = state.dxf && state.dxf.wcsOffsets ? state.dxf.wcsOffsets : {};
+      const ox = (wcsData[wcs] && wcsData[wcs].x) || 0;
+      const oy = (wcsData[wcs] && wcsData[wcs].y) || 0;
+      if (wcsOxInput) wcsOxInput.value = ox;
+      if (wcsOyInput) wcsOyInput.value = oy;
+    });
+  }
+
   if (wcsBtn) {
     wcsBtn.addEventListener("click", () => {
-      const wcs = (document.getElementById("wcs-select") || {}).value || "G54";
-      const ox = parseFloat((document.getElementById("wcs-offset-x") || {}).value) || 0;
-      const oy = parseFloat((document.getElementById("wcs-offset-y") || {}).value) || 0;
+      const wcs = (wcsSelect || {}).value || "G54";
+      const ox = parseFloat((wcsOxInput || {}).value) || 0;
+      const oy = parseFloat((wcsOyInput || {}).value) || 0;
       post("setWcsOffset", { wcs, x: ox, y: oy });
       const st = document.getElementById("wcs-status");
       if (st) { st.textContent = "✓ " + wcs + " X=" + ox + " Y=" + oy; setTimeout(() => { st.textContent = ""; }, 3000); }
@@ -597,6 +621,18 @@ function renderDxf() {
   syncInputValue(dom.cadFile, state.dxf.fileName || "");
   const speedInput = document.getElementById("global-speed-input");
   if (speedInput && state.dxf.globalSpeed) syncInputValue(speedInput, state.dxf.globalSpeed);
+
+  // Sync WCS settings
+  const wcsSelectEl = document.getElementById("wcs-select");
+  if (wcsSelectEl && state.dxf.activeWcs) {
+    syncInputValue(wcsSelectEl, state.dxf.activeWcs);
+    const wcsData = state.dxf.wcsOffsets || {};
+    const activeData = wcsData[state.dxf.activeWcs] || {};
+    const wcsOx = document.getElementById("wcs-offset-x");
+    const wcsOy = document.getElementById("wcs-offset-y");
+    if (wcsOx) syncInputValue(wcsOx, String(activeData.x || 0));
+    if (wcsOy) syncInputValue(wcsOy, String(activeData.y || 0));
+  }
 
   const importBtn = document.getElementById("import-cad-to-process-button");
   if (importBtn) {

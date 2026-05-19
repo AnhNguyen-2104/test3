@@ -45,7 +45,13 @@ namespace DACDT_2026
 
         private void ExtractEntity(EntityObject entity, CadTransform transform, CadExtractionContext context, int depth)
         {
-            if (entity == null || !entity.IsVisible || depth > 50)
+            if (entity == null || !entity.IsVisible || depth > 20)
+            {
+                return;
+            }
+
+            // Giới hạn tổng số primitives để tránh tràn bộ nhớ với file DXF lớn
+            if (context.Primitives.Count > 5000)
             {
                 return;
             }
@@ -236,6 +242,7 @@ namespace DACDT_2026
             public string MCodeValue { get; set; }
             public string Speed { get; set; }
             public string Dwell { get; set; }
+            public int WcsIndex { get; set; } // 0=G54, 1=G55, ..., 5=G59. -1=no WCS (DXF)
         }
 
         public sealed class CadPointData
