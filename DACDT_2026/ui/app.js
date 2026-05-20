@@ -211,6 +211,37 @@ function bindEvents() {
     btn.addEventListener("pointercancel", stop);
   });
   dom.openDxf.addEventListener("click", () => post("openDxf"));
+
+  // RUN button (hold to run, same as START ACTION)
+  const runActionBtn = document.getElementById("run-action-btn");
+  if (runActionBtn) {
+    const stopRun = () => post("startActionStop");
+    runActionBtn.addEventListener("pointerdown", e => { if (e.button !== 0) return; post("startActionStart"); });
+    runActionBtn.addEventListener("pointerup", stopRun);
+    runActionBtn.addEventListener("pointerleave", stopRun);
+    runActionBtn.addEventListener("pointercancel", stopRun);
+  }
+
+  // HOME button (hold, M503)
+  const dxfHomeBtn = document.getElementById("dxf-home-btn");
+  if (dxfHomeBtn) {
+    const stopHome = () => post("goHomeStop");
+    dxfHomeBtn.addEventListener("pointerdown", e => { if (e.button !== 0) return; post("goHomeStart"); });
+    dxfHomeBtn.addEventListener("pointerup", stopHome);
+    dxfHomeBtn.addEventListener("pointerleave", stopHome);
+    dxfHomeBtn.addEventListener("pointercancel", stopHome);
+  }
+
+  // RESET button (hold, M300)
+  const dxfResetBtn = document.getElementById("dxf-reset-btn");
+  if (dxfResetBtn) {
+    const stopReset = () => post("resetErrorStop");
+    dxfResetBtn.addEventListener("pointerdown", e => { if (e.button !== 0) return; post("resetErrorStart"); });
+    dxfResetBtn.addEventListener("pointerup", stopReset);
+    dxfResetBtn.addEventListener("pointerleave", stopReset);
+    dxfResetBtn.addEventListener("pointercancel", stopReset);
+  }
+
   const saveGcodeBtn = document.getElementById("save-gcode-btn");
   const gcodeTa = document.getElementById("gcode-textarea");
   const gcodeLineNumbers = document.getElementById("gcode-line-numbers");
@@ -619,6 +650,53 @@ function renderControl() {
       }
     }
   }
+
+  // Update position marker on 2D CAD view
+  updatePositionMarker();
+
+  // Update highlight completed paths based on marker position
+  const currDataNo = (axes[0] && axes[0].currentDataNo && axes[0].currentDataNo !== "--") ? parseInt(axes[0].currentDataNo, 10) : 0;
+  if (currDataNo > 0) {
+    const allLines = document.querySelectorAll("#cad-transform-group .cad-line");
+    allLines.forEach((line, idx) => {
+      // Primitive index < currentDataNo means robot has passed this segment
+      if (idx < currDataNo - 1) {
+        if (!line.classList.contains("cad-line-done")) {
+          line.classList.add("cad-line-done");
+        }
+      }
+    });
+  }
+}
+
+function updatePositionMarker() {
+  const svgGroup = document.getElementById("cad-transform-group");
+  if (!svgGroup) return;
+  // Remove old marker
+  const old = svgGroup.querySelector(".cad-pos-marker");
+  if (old) old.remove();
+
+  const axes = state.control && state.control.axes ? state.control.axes : [];
+  if (axes.length < 2) return;
+  const posXStr = axes[0] && axes[0].currentPos ? axes[0].currentPos : null;
+  const posYStr = axes[1] && axes[1].currentPos ? axes[1].currentPos : null;
+  if (!posXStr || !posYStr || posXStr === "--" || posYStr === "--") return;
+  const posX = parseFloat(posXStr);
+  const posY = parseFloat(posYStr);
+  if (isNaN(posX) || isNaN(posY)) return;
+
+  const bounds = state.dxf && state.dxf.bounds ? state.dxf.bounds : { left: 0, top: 0, width: 100, height: 100 };
+  const W = 1000, H = 560, pad = 28;
+  const ww = Math.max(bounds.width || 0, 1), wh = Math.max(bounds.height || 0, 1);
+  const sc = Math.min((W - pad * 2) / ww, (H - pad * 2) / wh);
+  const ox = (W - ww * sc) / 2, oy = (H - wh * sc) / 2;
+  const px = ox + (posX - bounds.left) * sc;
+  const py = H - oy - (posY - bounds.top) * sc;
+
+  const marker = document.createElementNS("http://www.w3.org/2000/svg", "g");
+  marker.setAttribute("class", "cad-pos-marker");
+  marker.innerHTML = `<circle cx="${px.toFixed(2)}" cy="${py.toFixed(2)}" r="3" fill="rgba(239,68,68,0.9)" stroke="white" stroke-width="1"/><circle cx="${px.toFixed(2)}" cy="${py.toFixed(2)}" r="6" fill="none" stroke="rgba(239,68,68,0.5)" stroke-width="0.8" stroke-dasharray="2,2"/>`;
+  svgGroup.appendChild(marker);
 }
 
 function renderEvents() {
@@ -789,12 +867,24 @@ function renderCadPreview() {
     return st.includes("g0") || st.includes("rapid");
   }
 
-  const polyM = primitives.map(pr => {
+  // Xác định dòng đang chạy để highlight biên dạng đã hoàn thành
+  const axes2 = state.control && state.control.axes ? state.control.axes : [];
+  const currentDataNo = (axes2[0] && axes2[0].currentDataNo && axes2[0].currentDataNo !== "--") ? parseInt(axes2[0].currentDataNo, 10) : 0;
+
+  const polyM = primitives.map((pr, idx) => {
     const pts = pr.points || [];
     if (pts.length < 2) return "";
     const pa = pts.map(p => { const pp = proj(p); return `${pp.x.toFixed(2)},${pp.y.toFixed(2)}`; }).join(" ");
     const rapid = isGcode && primIsRapid(pr);
-    const cls = rapid ? "cad-line cad-line-rapid" : "cad-line";
+    const completed = currentDataNo > 0 && idx < currentDataNo;
+    let cls;
+    if (completed) {
+      cls = "cad-line cad-line-done";
+    } else if (rapid) {
+      cls = "cad-line cad-line-rapid";
+    } else {
+      cls = "cad-line";
+    }
     return `<polyline class="${cls}" points="${pa}"></polyline>`;
   }).join("");
 
@@ -813,17 +903,36 @@ function renderCadPreview() {
   const pyArrow = proj({ x: 0, y: 20 });
 
   const originMarker = `<g class="cad-workspace-limit">
-    <polygon points="${p0.x.toFixed(2)},${p0.y.toFixed(2)} ${px.x.toFixed(2)},${px.y.toFixed(2)} ${pxy.x.toFixed(2)},${pxy.y.toFixed(2)} ${py.x.toFixed(2)},${py.y.toFixed(2)}" fill="rgba(255, 255, 255, 0.05)" stroke="rgba(50, 200, 255, 0.5)" stroke-width="1.5" stroke-dasharray="6,4" />
-    <line x1="${p0.x.toFixed(2)}" y1="${p0.y.toFixed(2)}" x2="${pxArrow.x.toFixed(2)}" y2="${pxArrow.y.toFixed(2)}" stroke="rgba(255, 50, 50, 0.9)" stroke-width="2.5" />
-    <polygon points="${pxArrow.x.toFixed(2)},${pxArrow.y.toFixed(2)} ${(pxArrow.x - 12).toFixed(2)},${(pxArrow.y - 6).toFixed(2)} ${(pxArrow.x - 12).toFixed(2)},${(pxArrow.y + 6).toFixed(2)}" fill="rgba(255, 50, 50, 0.9)" />
-    <text x="${(pxArrow.x + 6).toFixed(2)}" y="${(pxArrow.y + 5).toFixed(2)}" fill="rgba(255, 50, 50, 0.9)" font-size="15" font-weight="bold" font-family="monospace">X</text>
-    <line x1="${p0.x.toFixed(2)}" y1="${p0.y.toFixed(2)}" x2="${pyArrow.x.toFixed(2)}" y2="${pyArrow.y.toFixed(2)}" stroke="rgba(50, 255, 50, 0.9)" stroke-width="2.5" />
-    <polygon points="${pyArrow.x.toFixed(2)},${pyArrow.y.toFixed(2)} ${(pyArrow.x - 6).toFixed(2)},${(pyArrow.y + 12).toFixed(2)} ${(pyArrow.x + 6).toFixed(2)},${(pyArrow.y + 12).toFixed(2)}" fill="rgba(50, 255, 50, 0.9)" />
-    <text x="${(pyArrow.x + 8).toFixed(2)}" y="${(pyArrow.y + 5).toFixed(2)}" fill="rgba(50, 255, 50, 0.9)" font-size="15" font-weight="bold" font-family="monospace">Y</text>
-    <circle cx="${p0.x.toFixed(2)}" cy="${p0.y.toFixed(2)}" r="5" fill="none" stroke="yellow" stroke-width="2.5"/>
+    <polygon points="${p0.x.toFixed(2)},${p0.y.toFixed(2)} ${px.x.toFixed(2)},${px.y.toFixed(2)} ${pxy.x.toFixed(2)},${pxy.y.toFixed(2)} ${py.x.toFixed(2)},${py.y.toFixed(2)}" fill="none" stroke="rgba(50, 200, 255, 0.3)" stroke-width="1.8" stroke-dasharray="4,3" />
+    <line x1="${p0.x.toFixed(2)}" y1="${p0.y.toFixed(2)}" x2="${pxArrow.x.toFixed(2)}" y2="${pxArrow.y.toFixed(2)}" stroke="rgba(255, 50, 50, 0.7)" stroke-width="1.8" />
+    <polygon points="${pxArrow.x.toFixed(2)},${pxArrow.y.toFixed(2)} ${(pxArrow.x - 6).toFixed(2)},${(pxArrow.y - 3).toFixed(2)} ${(pxArrow.x - 6).toFixed(2)},${(pxArrow.y + 3).toFixed(2)}" fill="rgba(255, 50, 50, 0.7)" />
+    <text x="${(pxArrow.x + 4).toFixed(2)}" y="${(pxArrow.y + 3).toFixed(2)}" fill="rgba(255, 50, 50, 0.8)" font-size="10" font-weight="bold" font-family="monospace">X</text>
+    <line x1="${p0.x.toFixed(2)}" y1="${p0.y.toFixed(2)}" x2="${pyArrow.x.toFixed(2)}" y2="${pyArrow.y.toFixed(2)}" stroke="rgba(50, 255, 50, 0.7)" stroke-width="1.8" />
+    <polygon points="${pyArrow.x.toFixed(2)},${pyArrow.y.toFixed(2)} ${(pyArrow.x - 3).toFixed(2)},${(pyArrow.y + 6).toFixed(2)} ${(pyArrow.x + 3).toFixed(2)},${(pyArrow.y + 6).toFixed(2)}" fill="rgba(50, 255, 50, 0.7)" />
+    <text x="${(pyArrow.x + 5).toFixed(2)}" y="${(pyArrow.y + 3).toFixed(2)}" fill="rgba(50, 255, 50, 0.8)" font-size="10" font-weight="bold" font-family="monospace">Y</text>
+    <circle cx="${p0.x.toFixed(2)}" cy="${p0.y.toFixed(2)}" r="3" fill="none" stroke="yellow" stroke-width="1.8"/>
   </g>`;
 
-  dom.cadPreview.innerHTML = `<g id="cad-transform-group" transform="translate(${cadPanX},${cadPanY}) scale(${cadZoom})">${originMarker}<g>${polyM}</g><g>${ptM}</g><g>${aM}</g></g>${zProfileSvg}`;
+  // Current position marker (from axis monitor)
+  let posMarker = "";
+  const axes = state.control && state.control.axes ? state.control.axes : [];
+  if (axes.length >= 2) {
+    const posXStr = axes[0] && axes[0].currentPos ? axes[0].currentPos : null;
+    const posYStr = axes[1] && axes[1].currentPos ? axes[1].currentPos : null;
+    if (posXStr && posYStr && posXStr !== "--" && posYStr !== "--") {
+      const posX = parseFloat(posXStr);
+      const posY = parseFloat(posYStr);
+      if (!isNaN(posX) && !isNaN(posY)) {
+        const pp = proj({ x: posX, y: posY });
+        posMarker = `<g class="cad-pos-marker">
+          <circle cx="${pp.x.toFixed(2)}" cy="${pp.y.toFixed(2)}" r="6" fill="rgba(239,68,68,0.8)" stroke="white" stroke-width="2"/>
+          <circle cx="${pp.x.toFixed(2)}" cy="${pp.y.toFixed(2)}" r="12" fill="none" stroke="rgba(239,68,68,0.5)" stroke-width="1.5" stroke-dasharray="3,3"/>
+        </g>`;
+      }
+    }
+  }
+
+  dom.cadPreview.innerHTML = `<g id="cad-transform-group" transform="translate(${cadPanX},${cadPanY}) scale(${cadZoom})">${originMarker}<g>${polyM}</g><g>${ptM}</g><g>${aM}</g>${posMarker}</g>${zProfileSvg}`;
 }
 
 function renderTelemetry() {
