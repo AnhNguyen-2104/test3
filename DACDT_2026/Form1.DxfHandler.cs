@@ -178,9 +178,12 @@ namespace DACDT_2026
             GC.WaitForPendingFinalizers();
         }
 
+        private bool isPreviewingGcode = false;
         private async Task HandlePreviewGcodeAsync(string text)
         {
             if (activeDocumentKind != "GCODE") return;
+            if (isPreviewingGcode) return; // Tránh concurrent preview gây crash
+            isPreviewingGcode = true;
 
             try
             {
@@ -188,20 +191,31 @@ namespace DACDT_2026
                 string path = activeCadDocument?.FilePath;
                 if (string.IsNullOrEmpty(path)) path = null;
 
-                // Parse trên background thread
+                // Parse trên thread với stack lớn (tránh StackOverflow với file lớn)
                 CadDocumentService.CadLoadResult previewDoc = null;
-                await Task.Run(() =>
+                var previewTask = new System.Threading.Tasks.TaskCompletionSource<bool>();
+                var previewThread = new System.Threading.Thread(() =>
                 {
-                    previewDoc = gcodeCoordinateService.LoadAsCadFromText(text, path);
-
-                    if (previewDoc?.Primitives != null && previewDoc.Primitives.Count > 0)
+                    try
                     {
-                        var paths = GetConnectedPathsFromCad(previewDoc.Primitives, isGcode: true);
-                        previewDoc.Primitives.Clear();
-                        foreach (var pathList in paths)
-                            previewDoc.Primitives.AddRange(pathList);
+                        previewDoc = gcodeCoordinateService.LoadAsCadFromText(text, path);
+                        if (previewDoc?.Primitives != null && previewDoc.Primitives.Count > 0)
+                        {
+                            var paths = GetConnectedPathsFromCad(previewDoc.Primitives, isGcode: true);
+                            previewDoc.Primitives.Clear();
+                            foreach (var pathList in paths)
+                                previewDoc.Primitives.AddRange(pathList);
+                        }
+                        previewTask.TrySetResult(true);
                     }
-                });
+                    catch (Exception ex)
+                    {
+                        previewTask.TrySetException(ex);
+                    }
+                }, 4 * 1024 * 1024); // 4MB stack
+                previewThread.IsBackground = true;
+                previewThread.Start();
+                await previewTask.Task;
 
                 activeCadDocument = previewDoc;
 
@@ -217,6 +231,10 @@ namespace DACDT_2026
             catch
             {
                 // Ignore preview errors if typing incomplete
+            }
+            finally
+            {
+                isPreviewingGcode = false;
             }
         }
 
@@ -238,57 +256,79 @@ namespace DACDT_2026
 
         private async Task HandleSaveGcodeAsync(string text)
         {
-            if (activeDocumentKind != "GCODE" || activeCadDocument == null) return;
+            if (activeDocumentKind != "GCODE") return;
+            isPreviewingGcode = true;
 
             try
             {
-                string path = activeCadDocument.FilePath;
-                if (string.IsNullOrEmpty(path) || path == "Untitled")
+                string path = activeCadDocument?.FilePath;
+                if (string.IsNullOrEmpty(path) || path == "Untitled" || path == "")
                 {
-                    // SaveFileDialog phải chạy trên UI thread
+                    // Tạm đổi FormBorderStyle để SaveFileDialog không crash
                     string selectedPath = null;
-
                     if (this.InvokeRequired)
                     {
-                        this.Invoke(new Action(() =>
-                        {
-                            using (var sfd = new SaveFileDialog())
-                            {
-                                sfd.Filter   = "G-code files (*.gcode;*.nc;*.txt)|*.gcode;*.nc;*.txt|All files (*.*)|*.*";
-                                sfd.Title    = "Save New G-code";
-                                sfd.FileName = "New_GCode_" + DateTime.Now.ToString("yyyyMMdd_HHmmss") + ".gcode";
-                                if (sfd.ShowDialog(this) == DialogResult.OK)
-                                    selectedPath = sfd.FileName;
-                            }
-                        }));
+                        this.Invoke(new System.Action(() => { selectedPath = ShowSaveGcodeDialog(); }));
                     }
                     else
                     {
-                        using (var sfd = new SaveFileDialog())
-                        {
-                            sfd.Filter   = "G-code files (*.gcode;*.nc;*.txt)|*.gcode;*.nc;*.txt|All files (*.*)|*.*";
-                            sfd.Title    = "Save New G-code";
-                            sfd.FileName = "New_GCode_" + DateTime.Now.ToString("yyyyMMdd_HHmmss") + ".gcode";
-                            if (sfd.ShowDialog(this) == DialogResult.OK)
-                                selectedPath = sfd.FileName;
-                        }
+                        selectedPath = ShowSaveGcodeDialog();
                     }
 
-                    if (string.IsNullOrEmpty(selectedPath)) return;
+                    if (string.IsNullOrEmpty(selectedPath))
+                    {
+                        isPreviewingGcode = false;
+                        return;
+                    }
 
                     path = selectedPath;
-                    activeCadDocument.FilePath = path;
-                    activeCadDocument.FileName = Path.GetFileName(path);
+                    if (activeCadDocument != null)
+                    {
+                        activeCadDocument.FilePath = path;
+                        activeCadDocument.FileName = Path.GetFileName(path);
+                    }
                 }
 
                 await Task.Run(() => File.WriteAllText(path, text));
-                await HandlePreviewGcodeAsync(text);
+                isPreviewingGcode = false;
+                try { await HandlePreviewGcodeAsync(text); } catch { }
+                await PushDxfStateAsync();
                 await NotifyAsync("success", "G-code", $"Lưu G-code thành công tại:\n{path}");
             }
             catch (Exception ex)
             {
                 await NotifyAsync("error", "G-code", "Lỗi khi lưu G-code: " + ex.Message);
             }
+            finally
+            {
+                isPreviewingGcode = false;
+            }
+        }
+
+        private string ShowSaveGcodeDialog()
+        {
+            // Tạm đổi border style để dialog không crash với FormBorderStyle.None
+            var originalStyle = this.FormBorderStyle;
+            this.FormBorderStyle = FormBorderStyle.Sizable;
+            this.WindowState = FormWindowState.Maximized;
+            string result = null;
+            try
+            {
+                using (var sfd = new SaveFileDialog())
+                {
+                    sfd.Filter = "G-code files (*.nc;*.gcode;*.txt)|*.nc;*.gcode;*.txt|All files (*.*)|*.*";
+                    sfd.Title = "Save G-code";
+                    sfd.FileName = "GCode_" + DateTime.Now.ToString("yyyyMMdd_HHmmss") + ".nc";
+                    if (sfd.ShowDialog(this) == DialogResult.OK)
+                        result = sfd.FileName;
+                }
+            }
+            finally
+            {
+                this.FormBorderStyle = originalStyle;
+                this.WindowState = FormWindowState.Maximized;
+            }
+            return result;
         }
 
         private static bool IsGcodeFile(string filePath)

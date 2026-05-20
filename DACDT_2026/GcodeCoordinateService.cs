@@ -517,12 +517,38 @@ namespace DACDT_2026
                 line = line.Substring(0, checksumIndex);
 
             // Strip line comment (; ...) — phần sau dấu chấm phẩy là comment, bỏ qua
-            // để tránh parser đọc nhầm "M03" trong comment thành M code thật.
             int semicolonIndex = line.IndexOf(';');
             if (semicolonIndex >= 0)
                 line = line.Substring(0, semicolonIndex);
 
-            return StripParentheses(line).Trim();
+            line = StripParentheses(line).Trim();
+
+            // Filter các token có số chưa hoàn chỉnh (vd "X1.", "Y-", "G")
+            // để tránh GcodeParser ném FormatException khi user đang gõ dở.
+            if (HasIncompleteNumber(line))
+                return string.Empty;
+
+            return line;
+        }
+
+        private static bool HasIncompleteNumber(string line)
+        {
+            if (string.IsNullOrWhiteSpace(line)) return false;
+            // Tìm pattern: chữ cái + (-/.) ở cuối hoặc + số kết thúc bằng . hoặc -
+            var tokens = line.Split(' ', '\t');
+            foreach (var token in tokens)
+            {
+                if (token.Length < 2) continue;
+                char letter = char.ToUpper(token[0]);
+                if (!char.IsLetter(letter)) continue;
+                string num = token.Substring(1);
+                if (string.IsNullOrEmpty(num)) return true;
+                // Số chỉ có "-", ".", "-." → chưa hoàn chỉnh
+                if (num == "-" || num == "." || num == "-." || num == "+") return true;
+                // Số kết thúc bằng "." → vd "X1.", chưa hoàn chỉnh
+                if (num.EndsWith(".") || num.EndsWith("-")) return true;
+            }
+            return false;
         }
 
         private static string StripParentheses(string value)

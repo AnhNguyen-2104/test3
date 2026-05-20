@@ -150,6 +150,7 @@ function cacheDom() {
   dom.applyOffsetBtn = document.getElementById("apply-offset-btn");
   dom.sendRowCount   = document.getElementById("send-row-count");
   dom.viewSettings   = document.getElementById("view-settings");
+  dom.viewHelp       = document.getElementById("view-help");
 }
 
 function bindEvents() {
@@ -222,9 +223,14 @@ function bindEvents() {
   }
   
   let gcodeTimeout;
+  let isSavingGcode = false; // Block preview khi đang save dialog
   if (saveGcodeBtn && gcodeTa) {
     saveGcodeBtn.addEventListener("click", () => {
+      isSavingGcode = true;
+      clearTimeout(gcodeTimeout);
       post("saveGcode", { text: gcodeTa.value.toUpperCase() });
+      // Release sau 5s (save nhanh, không cần dialog)
+      setTimeout(() => { isSavingGcode = false; }, 5000);
     });
     gcodeTa.addEventListener("input", function() {
       const start = this.selectionStart;
@@ -234,9 +240,9 @@ function bindEvents() {
         this.value = upper;
         this.setSelectionRange(start, end);
       }
-      // Update line numbers on input
       updateGcodeLineNumbers();
       clearTimeout(gcodeTimeout);
+      if (isSavingGcode) return; // Bỏ qua preview khi đang save
       gcodeTimeout = setTimeout(() => {
         post("previewGcode", { text: this.value });
       }, 400);
@@ -873,6 +879,7 @@ function applyView(v) {
   dom.viewTelemetry && dom.viewTelemetry.classList.toggle("is-active", v === "telemetry");
   dom.viewDxf      && dom.viewDxf.classList.toggle("is-active",      v === "dxf");
   dom.viewSettings && dom.viewSettings.classList.toggle("is-active", v === "settings");
+  dom.viewHelp && dom.viewHelp.classList.toggle("is-active", v === "help");
   updateNavState();
 }
 function updateNavState() { const s = b => { b.classList.toggle("is-active", b.dataset.view === state.view); }; dom.topViewButtons.forEach(s); dom.sideViewButtons.forEach(s); }

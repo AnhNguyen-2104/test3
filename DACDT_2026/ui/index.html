@@ -25,6 +25,7 @@
           <button class="nav-link" data-view="telemetry">TELEMETRY</button>
           <button class="nav-link" data-view="settings">SYSTEM SETTINGS</button>
           <button class="nav-link" data-view="dxf">DXF/GCODE RUN</button>
+          <button class="nav-link" data-view="help">HELP</button>
         </nav>
       </div>
       <div class="top-actions">
@@ -49,6 +50,7 @@
         <button class="side-link" data-view="logs">LOGS</button>
         <button class="side-link" data-view="settings">SETTINGS</button>
         <button class="side-link" data-view="dxf">DXF/GCODE RUN</button>
+        <button class="side-link" data-view="help">HELP</button>
       </nav>
 
       <!-- Manual Jog in sidebar -->
@@ -416,6 +418,90 @@
 
           <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border);font-size:11px;color:var(--muted);">
             Các cài đặt được lưu vào file app_settings.txt — tự động load khi mở app.
+          </div>
+        </div>
+      </section>
+
+      <!-- ========== HELP ========== -->
+      <section id="view-help" class="view">
+        <div class="panel" style="max-width:800px;line-height:1.7;">
+          <div class="panel-header">
+            <div>
+              <div class="panel-title">User Guide</div>
+              <div class="panel-subtitle">Hướng dẫn sử dụng DACDT 2026</div>
+            </div>
+          </div>
+
+          <div style="margin-top:16px;font-size:13px;color:var(--text-main);">
+
+            <h3 style="color:var(--cyan);margin:20px 0 8px;">1. Dashboard</h3>
+            <p>Hiển thị trạng thái kết nối PLC, vị trí 3 trục (X, Y, Z), tốc độ, error code, và Program Monitor theo dõi dòng lệnh đang chạy.</p>
+            <ul>
+              <li><b>CONNECT PLC Q</b> — Kết nối PLC Mitsubishi qua MX Component (logical station)</li>
+              <li><b>HOME</b> — Về gốc máy (giữ nút)</li>
+              <li><b>RESET</b> — Reset lỗi trục (giữ nút)</li>
+              <li><b>START ACTION</b> — Bắt đầu chạy chương trình đã nạp (giữ nút)</li>
+              <li><b>EMERGENCY STOP</b> — Dừng khẩn cấp</li>
+              <li><b>Manual Jog</b> — Điều khiển tay bằng nút ←↑→↓ Z+/Z-</li>
+            </ul>
+
+            <h3 style="color:var(--cyan);margin:20px 0 8px;">2. DXF/GCODE RUN</h3>
+            <p>Mở file DXF hoặc G-code, xem bản vẽ 2D, chỉnh sửa G-code, và gửi xuống PLC.</p>
+            <ul>
+              <li><b>Open</b> — Mở file DXF (.dxf) hoặc G-code (.nc, .gcode, .g)</li>
+              <li><b>New</b> — Tạo file G-code mới (trống)</li>
+              <li><b>Save G-code</b> — Lưu file G-code (chọn đường dẫn lần đầu)</li>
+              <li><b>Send CAD to PLC</b> — Gửi toàn bộ chương trình xuống buffer PLC</li>
+              <li><b>Clear Buffer</b> — Xóa buffer PLC trước khi nạp chương trình mới</li>
+            </ul>
+            <p><b>Geometry Data</b> — Bảng tọa độ các đoạn Line/Arc/Circle từ file</p>
+            <p><b>Process Table</b> — Bảng lệnh chạy gửi xuống PLC (Motion type, M code, Speed, tọa độ đích)</p>
+
+            <h3 style="color:var(--cyan);margin:20px 0 8px;">3. G-code hỗ trợ</h3>
+            <table class="data-table compact" style="font-size:12px;margin:8px 0;">
+              <tr><td><b>G00</b></td><td>Di chuyển nhanh (rapid) — dùng tốc độ từ Settings</td></tr>
+              <tr><td><b>G01</b></td><td>Nội suy tuyến tính — tốc độ từ F</td></tr>
+              <tr><td><b>G02</b></td><td>Nội suy cung tròn CW (thuận kim) — I/J hoặc R</td></tr>
+              <tr><td><b>G03</b></td><td>Nội suy cung tròn CCW (ngược kim) — I/J hoặc R</td></tr>
+              <tr><td><b>G54–G59</b></td><td>Chọn hệ tọa độ phôi (offset cộng vào tọa độ)</td></tr>
+              <tr><td><b>G90</b></td><td>Chế độ tọa độ tuyệt đối</td></tr>
+              <tr><td><b>G91</b></td><td>Chế độ tọa độ tương đối</td></tr>
+              <tr><td><b>M03</b></td><td>Bắt đầu dispensing (bật keo)</td></tr>
+              <tr><td><b>M04</b></td><td>Kết thúc dispensing (tắt keo)</td></tr>
+            </table>
+            <p><b>Quy tắc modal:</b> Dòng chỉ có tọa độ (không có G) sẽ dùng lệnh G trước đó. Dòng chỉ có X hoặc Y sẽ giữ nguyên trục còn lại.</p>
+
+            <h3 style="color:var(--cyan);margin:20px 0 8px;">4. DXF hỗ trợ</h3>
+            <p>Đọc được: <b>Line, Polyline2D, Polyline3D, Arc, Circle, Block/Insert</b></p>
+            <p>Tự động gán M03 (đầu path) và M04 (cuối path) cho mỗi quỹ đạo.</p>
+
+            <h3 style="color:var(--cyan);margin:20px 0 8px;">5. Settings</h3>
+            <ul>
+              <li><b>G00 Rapid Speed</b> — Tốc độ G00 (mm/min), áp dụng cho tất cả lệnh G00</li>
+              <li><b>Workspace Size</b> — Kích thước vùng làm việc hiển thị trên bản vẽ 2D</li>
+              <li><b>DXF Offset & Speed</b> — Offset X/Y, Speed, Dwell M03/M04 cho file DXF</li>
+              <li><b>G54–G59 WCS Offsets</b> — Offset tọa độ cho từng hệ tọa độ phôi (G-code)</li>
+            </ul>
+            <p>Tất cả settings được lưu vào <code>app_settings.txt</code> và tự động load khi mở app.</p>
+
+            <h3 style="color:var(--cyan);margin:20px 0 8px;">6. Quy trình vận hành</h3>
+            <ol>
+              <li>Kết nối PLC (nhấn CONNECT PLC Q)</li>
+              <li>Mở file DXF hoặc G-code (tab DXF/GCODE RUN → Open)</li>
+              <li>Kiểm tra Process Table và bản vẽ 2D</li>
+              <li>Cài đặt Speed, Offset nếu cần (tab Settings)</li>
+              <li>Nhấn <b>Clear Buffer</b> → <b>Send CAD to PLC</b></li>
+              <li>Nhấn giữ <b>START ACTION</b> để chạy</li>
+              <li>Theo dõi Program Monitor trên Dashboard</li>
+            </ol>
+
+            <h3 style="color:var(--cyan);margin:20px 0 8px;">7. Phím tắt & Thao tác</h3>
+            <ul>
+              <li><b>Cuộn chuột</b> trên bản vẽ 2D — Zoom in/out</li>
+              <li><b>Kéo chuột</b> trên bản vẽ 2D — Pan (di chuyển)</li>
+              <li><b>EXIT APP</b> (sidebar) — Thoát chương trình</li>
+            </ul>
+
           </div>
         </div>
       </section>
