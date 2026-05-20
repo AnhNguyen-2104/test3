@@ -669,8 +669,7 @@ namespace DACDT_2026
         /// <summary>
         /// Send all positioning data rows to PLC using a single bulk WriteBuffer call.
         /// This is significantly faster than individual writes for large point sets.
-        /// MotionType đã được post-process đúng: Linear3/Rapid3 = 3-axis, Line = 2-axis.
-        /// Axis 3 (Z) buffer chỉ được ghi cho các dòng 3-axis.
+        /// Only writes Axis 1 (X master) buffer. Axis 2 (Y slave) is handled separately.
         /// </summary>
         public static SendResult WritePositioningDataBulk(PLCCommunication plcComm, int axisIndex, List<PositioningDataRow> rows, bool writeStartNo = true)
         {
@@ -727,31 +726,13 @@ namespace DACDT_2026
             int totalWords = rows.Count * Stride;
             short[] bulkData = new short[totalWords];
 
-            // Axis 3 (Z) buffer — chỉ ghi nếu có ít nhất 1 dòng có Z
-            bool hasAnyZ = false;
-            short[] zBulkData = new short[totalWords]; // zero-init = không có Z
-
             for (int i = 0; i < rows.Count; i++)
             {
                 var row = rows[i];
                 int blockOffset = i * Stride;
 
                 // 1. Positioning Identifier (16-bit)
-                // MotionType đã được post-process đúng:
-                //   - "Linear3" hoặc "Rapid3" → 3-axis (Da.2=0x15)
-                //   - "Line" → 2-axis (Da.2=0x0A)
-                //   - "Arc CW/CCW" → circular (Da.2=0x0F/0x10)
-                // Không cần override effectiveMotionType — dùng trực tiếp row.MotionType.
-                string effectiveMotionType = row.MotionType;
-                bool isRapid3  = row.MotionType.Contains("Rapid3");
-                bool isLinear3 = row.MotionType.Contains("Linear3");
-                bool isHelical = row.MotionType.Contains("Helical");
-                bool is3Axis   = isRapid3 || isLinear3 || isHelical;
-
-                if (is3Axis)
-                    hasAnyZ = true;
-
-                short moveCode = BuildPositioningIdentifierWord(effectiveMotionType);
+                short moveCode = BuildPositioningIdentifierWord(row.MotionType);
                 bulkData[blockOffset + OffsetMoveCode] = moveCode;
 
                 // 2. M Code (16-bit)
@@ -782,20 +763,6 @@ namespace DACDT_2026
                     bulkData[blockOffset + OffsetCenterX]     = (short)(centerX & 0xFFFF);
                     bulkData[blockOffset + OffsetCenterX + 1] = (short)((centerX >> 16) & 0xFFFF);
                 }
-
-                // 7. Axis 3 (Z) — Da.1+Da.2 + Da.6 position
-                // Chỉ ghi Z buffer khi dòng là 3-axis (Linear3 hoặc Rapid3)
-                if (is3Axis)
-                {
-                    // Da.1+Da.2 phải khớp với master
-                    short zMoveCode = BuildPositioningIdentifierWord(effectiveMotionType);
-                    zBulkData[blockOffset + OffsetMoveCode] = zMoveCode;
-
-                    // Da.6 Positioning address Z (32-bit)
-                    int endZScaled = Convert.ToInt32(Math.Round(row.EndZ * CoordinateMultiplier));
-                    zBulkData[blockOffset + OffsetPosX]     = (short)(endZScaled & 0xFFFF);
-                    zBulkData[blockOffset + OffsetPosX + 1] = (short)((endZScaled >> 16) & 0xFFFF);
-                }
             }
 
             try
@@ -821,47 +788,6 @@ namespace DACDT_2026
             {
                 result.Success = false;
                 result.ErrorMessage = ex.Message;
-            }
-
-            // Ghi Axis 3 (Z) nếu có dòng nào có Z
-            if (result.Success && hasAnyZ)
-            {
-                int zBaseG = ProgramBaseG[2]; // Axis 3 = G14000
-                try
-                {
-                    int res = plcComm.WriteBuffer(0, zBaseG, zBulkData);
-                    if (res != 0)
-                    {
-                        result.WriteResults.Add(new WriteResult
-                        {
-                            Address = $"U0\\G{zBaseG}",
-                            Value   = "Z axis data",
-                            Status  = $"Error({res})",
-                            Message = "WriteBuffer Axis 3 (Z) failed"
-                        });
-                        // Không fail toàn bộ — X/Y đã ghi thành công
-                    }
-                    else
-                    {
-                        result.WriteResults.Add(new WriteResult
-                        {
-                            Address = $"U0\\G{zBaseG} to U0\\G{zBaseG + totalWords - 1}",
-                            Value   = $"Bulk write {rows.Count} Z points",
-                            Status  = "OK",
-                            Message = "Bulk WriteBuffer (Axis Z) successful"
-                        });
-                    }
-                }
-                catch (Exception ex)
-                {
-                    result.WriteResults.Add(new WriteResult
-                    {
-                        Address = $"U0\\G{zBaseG}",
-                        Value   = "Z axis data",
-                        Status  = "Error",
-                        Message = ex.Message
-                    });
-                }
             }
 
             // Write Start No. = 1 to Control base register
@@ -1058,33 +984,8 @@ namespace DACDT_2026
                     });
                 }
 
-                // Xóa Axis 3 (Z) buffer — G14000+
-                int axis3Base = ProgramBaseG[2]; // 14000
-                int res3 = plcComm.WriteBuffer(0, axis3Base, zeroData);
-                if (res3 != 0)
-                {
-                    result.WriteResults.Add(new WriteResult
-                    {
-                        Address = $"U0\\G{axis3Base}",
-                        Value = "Clear buffer",
-                        Status = $"Error({res3})",
-                        Message = "Failed to clear Axis 3 (Z) buffer"
-                    });
-                    result.Success = false;
-                }
-                else
-                {
-                    result.WriteResults.Add(new WriteResult
-                    {
-                        Address = $"U0\\G{axis3Base} to U0\\G{axis3Base + totalWords - 1}",
-                        Value = $"Cleared {maxPoints} points",
-                        Status = "OK",
-                        Message = "Axis 3 (Z) buffer cleared"
-                    });
-                }
-
-                // Xóa Start No. về 0 cho tất cả các trục
-                for (int axisIdx = 0; axisIdx < 3; axisIdx++)
+                // Xóa Start No. về 0 cho Axis 1 và Axis 2
+                for (int axisIdx = 0; axisIdx < 2; axisIdx++)
                 {
                     string startDevice = $"U0\\G{ControlBaseG[axisIdx]}";
                     string used;

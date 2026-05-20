@@ -723,14 +723,8 @@ namespace DACDT_2026
                     return;
                 }
 
-                bool hasZAxis = dataRows.Exists(r =>
-                    r.MotionType != null &&
-                    (r.MotionType.Contains("Linear3") || r.MotionType.Contains("Rapid3") || r.MotionType.Contains("Helical")));
-                string axisInfo = hasZAxis
-                    ? "Axis 1 (G2000+) & Axis 2 (G8000+) & Axis 3/Z (G14000+)"
-                    : "Axis 1 (G2000+) & Axis 2 (G8000+)";
                 await NotifyAsync("success", "PLC",
-                    $"Đã nạp {sendResult.RowCount} dòng lệnh → {axisInfo}. Nhấn START ACTION để chạy.");
+                    $"Loaded {sendResult.RowCount} commands → Axis 1 (G2000+) & Axis 2 (G8000+). Press START/RUN to execute.");
             }
             finally
             {
