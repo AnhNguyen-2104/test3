@@ -160,7 +160,7 @@ function bindEvents() {
   dom.sideViewButtons.forEach(b => b.addEventListener("click", () => {
     state.view = b.dataset.view; applyView(state.view); post("switchView", { view: state.view });
   }));
-  dom.placeholderButtons.forEach(b => b.addEventListener("click", () => showToast("info", b.dataset.placeholder, "Mục này đang để placeholder.")));
+  dom.placeholderButtons.forEach(b => b.addEventListener("click", () => showToast("info", b.dataset.placeholder, "This feature is a placeholder.")));
   dom.themeToggle.addEventListener("click", () => { state.theme = state.theme === "dark" ? "light" : "dark"; applyTheme(state.theme); post("setTheme", { theme: state.theme }); });
   dom.connectButton.addEventListener("click", () => { post("connectToggle", { station: parseInt(dom.plcStation.value, 10) || 0 }); });
 
@@ -330,7 +330,7 @@ function bindEvents() {
   }
 
   if (dom.writeBufferButton) dom.writeBufferButton.addEventListener("click", () => {
-    if (!state.control || !state.control.connection || !state.control.connection.connected) { showToast("error", "Telemetry", "Chưa kết nối PLC."); return; }
+    if (!state.control || !state.control.connection || !state.control.connection.connected) { showToast("error", "Telemetry", "PLC not connected."); return; }
     post("writeBufferRequest", { path: dom.writeBufferPath.value.trim(), value: parseInt(dom.writeBufferValue.value, 10) || 0 });
   });
   const importBtn = document.getElementById("import-cad-to-process-button");
@@ -338,17 +338,17 @@ function bindEvents() {
   
   const sendBtn = document.getElementById("send-cad-x-button");
   if (sendBtn) sendBtn.addEventListener("click", () => {
-    if (!state.control || !state.control.connection || !state.control.connection.connected) { showToast("error", "Telemetry", "Chưa kết nối PLC."); return; }
+    if (!state.control || !state.control.connection || !state.control.connection.connected) { showToast("error", "Telemetry", "PLC not connected."); return; }
     post("sendCadX");
   });
   
   const clearBufferBtn = document.getElementById("clear-buffer-button");
   if (clearBufferBtn) clearBufferBtn.addEventListener("click", () => {
     if (!state.control || !state.control.connection || !state.control.connection.connected) { 
-      showToast("error", "Clear Buffer", "Chưa kết nối PLC."); 
+      showToast("error", "Clear Buffer", "PLC not connected."); 
       return; 
     }
-    if (confirm("Xóa toàn bộ buffer PLC (G2000+, G8000+, G14000+)?\n\nThao tác này sẽ xóa tất cả dữ liệu đã gửi xuống PLC.")) {
+    if (confirm("Clear all PLC buffer (G2000+, G8000+, G14000+)?\n\nThis will erase all data sent to PLC.")) {
       post("clearBuffer");
     }
   });
@@ -444,7 +444,7 @@ function initLogin() {
   const exitBtn = document.getElementById("exit-app-btn");
   if (exitBtn) {
     exitBtn.addEventListener("click", () => {
-      if (confirm("Thoát chương trình?")) {
+      if (confirm("Exit application?")) {
         post("exitApp");
       }
     });
@@ -535,7 +535,7 @@ function renderControl() {
   const fields = [
     { key: 'currentPos', label: 'CURRENT POSITION (mm)', addrKey: 'currentPosAddr', big: true },
     { key: 'currentSpeed', label: 'CURRENT SPEED (mm/min)', addrKey: 'currentSpeedAddr', big: true },
-    { key: 'mCode', label: 'M CODE HIỆN TẠI', addrKey: 'mCodeAddr' },
+    { key: 'mCode', label: 'CURRENT M CODE', addrKey: 'mCodeAddr' },
     { key: 'errorCode', label: 'ERROR CODE', addrKey: 'errorCodeAddr' },
     { key: 'warningCode', label: 'WARNING CODE', addrKey: 'warningCodeAddr' },
     { key: 'axisStatus', label: 'AXIS STATUS', addrKey: 'axisStatusAddr' },
@@ -674,7 +674,7 @@ function renderDxf() {
   if (dom.sendRowCount) {
     const count = (state.dxf.processRows || []).length;
     if (count > 0) {
-      dom.sendRowCount.textContent = count + " dòng";
+      dom.sendRowCount.textContent = count + " rows";
       dom.sendRowCount.style.display = "inline";
     } else {
       dom.sendRowCount.style.display = "none";
@@ -769,7 +769,7 @@ function renderProcessTable() {
     const endDisp   = r.endCoordinateDisplay   || r.endCoordinate   || "";
     const centDisp  = r.centerCoordinateDisplay || r.centerCoordinate || "";
     return `<tr data-process-index="${i}"><td>${esc(r.motionType || "")}</td><td><input type="text" class="text-input compact" style="margin:0;width:100%;min-width:80px" data-process-index="${i}" data-process-field="mcode" value="${esc(r.mCodeValue || "")}"></td><td><input type="text" class="text-input compact" style="margin:0;width:100%;min-width:60px" data-process-index="${i}" data-process-field="dwell" value="${esc(r.dwell || "")}"></td><td><input type="text" class="text-input compact" style="margin:0;width:100%;min-width:60px" data-process-index="${i}" data-process-field="speed" value="${esc(r.speed || "")}"></td><td>${esc(endDisp)}</td><td>${esc(centDisp)}</td></tr>`;
-  }).join("") + (overflow > 0 ? `<tr><td colspan="6" style="text-align:center;color:var(--muted);font-size:11px;padding:6px;">... còn ${overflow} dòng nữa (tổng ${rows.length})</td></tr>` : "");
+  }).join("") + (overflow > 0 ? `<tr><td colspan="6" style="text-align:center;color:var(--muted);font-size:11px;padding:6px;">... ${overflow} more rows (total ${rows.length})</td></tr>` : "");
 }
 
 function renderCadPreview() {

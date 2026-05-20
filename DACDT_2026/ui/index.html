@@ -217,7 +217,7 @@
           <div class="toolbar-field toolbar-file" style="flex: 0 0 120px;">
             <input id="cad-file" class="text-input compact" type="text" placeholder="File name" readonly>
           </div>
-          <button id="new-gcode-btn" class="primary-button toolbar-open compact" style="background:var(--panel-3); border:1px solid var(--border); color:var(--text); min-height: 38px; padding: 0 12px; margin-right: 4px;" title="Tạo G-code mới">New</button>
+          <button id="new-gcode-btn" class="primary-button toolbar-open compact" style="background:var(--panel-3); border:1px solid var(--border); color:var(--text); min-height: 38px; padding: 0 12px; margin-right: 4px;" title="Create new G-code">New</button>
           <button id="open-dxf" class="primary-button toolbar-open compact">Open</button>
 
           <div style="flex:1;"></div>
@@ -230,7 +230,7 @@
           </div>
           <!-- Send to PLC -->
           <div style="display:flex;align-items:center;gap:6px;">
-            <button id="clear-buffer-button" class="primary-button compact" style="background:#ef4444; font-size: 13px; padding: 0 16px;" title="Xóa toàn bộ buffer PLC (G2000+, G8000+, G14000+)">Clear Buffer</button>
+            <button id="clear-buffer-button" class="primary-button compact" style="background:#ef4444; font-size: 13px; padding: 0 16px;" title="Clear all PLC buffer (G2000+, G8000+, G14000+)">Clear Buffer</button>
             <button id="send-cad-x-button" class="primary-button compact" style="background:linear-gradient(135deg, #10b981, #059669); font-size: 13px; padding: 0 16px;">Send CAD to PLC</button>
             <span id="send-row-count" style="font-size:11px;color:var(--muted);white-space:nowrap;display:none;"></span>
           </div>
@@ -309,7 +309,7 @@
           <div class="panel-header">
             <div>
               <div class="panel-title">System Settings</div>
-              <div class="panel-subtitle">Cấu hình tham số chạy DXF/G-code</div>
+              <div class="panel-subtitle">DXF/G-code run parameters</div>
             </div>
           </div>
 
@@ -317,7 +317,7 @@
           <div style="margin-top:24px;padding-top:16px;border-top:1px solid var(--border);">
             <div style="font-size:13px;font-weight:600;color:var(--text-main);margin-bottom:4px;">G00 Rapid Speed (mm/min)</div>
             <div style="font-size:11px;color:var(--muted);margin-bottom:10px;">
-              Tốc độ áp dụng cho tất cả lệnh G00. Bỏ qua giá trị F trong file G-code. Mặc định: 10000.
+              Speed applied to all G00 commands. Ignores F value in G-code file. Default: 10000.
             </div>
             <div style="display:flex;gap:8px;align-items:center;">
               <input id="g0-speed-input" class="text-input" type="number" value="10000" min="1" step="1" style="width:160px;">
@@ -330,7 +330,7 @@
           <div style="margin-top:24px;padding-top:16px;border-top:1px solid var(--border);">
             <div style="font-size:13px;font-weight:600;color:var(--text-main);margin-bottom:4px;">Workspace Size (mm)</div>
             <div style="font-size:11px;color:var(--muted);margin-bottom:10px;">
-              Kích thước không gian làm việc hiển thị trên bản vẽ 2D (đường viền xanh nét đứt).
+              Work area dimensions displayed on the 2D drawing (dashed blue border).
             </div>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
               <div>
@@ -352,7 +352,7 @@
           <div style="margin-top:24px;padding-top:16px;border-top:1px solid var(--border);">
             <div style="font-size:13px;font-weight:600;color:var(--text-main);margin-bottom:4px;">DXF Offset & Speed</div>
             <div style="font-size:11px;color:var(--muted);margin-bottom:10px;">
-              Offset cộng vào tọa độ DXF khi gửi xuống PLC. Speed áp dụng cho tất cả lệnh chạy DXF. Chỉ áp dụng cho file DXF, không ảnh hưởng G-code.
+              Offset added to DXF coordinates when sending to PLC. Speed applies to all DXF commands. Only affects DXF files, not G-code.
             </div>
             <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr 1fr;gap:12px;">
               <div>
@@ -369,11 +369,11 @@
               </div>
               <div>
                 <div style="font-size:11px;color:var(--muted);margin-bottom:4px;">Dwell M03 (ms)</div>
-                <input id="dwell-m3-input" class="text-input" type="number" value="100" step="1" title="Thời gian chờ khi bắt đầu dispensing">
+                <input id="dwell-m3-input" class="text-input" type="number" value="100" step="1" title="Wait time at dispensing start">
               </div>
               <div>
                 <div style="font-size:11px;color:var(--muted);margin-bottom:4px;">Dwell M04 (ms)</div>
-                <input id="dwell-m4-input" class="text-input" type="number" value="100" step="1" title="Thời gian chờ khi kết thúc dispensing">
+                <input id="dwell-m4-input" class="text-input" type="number" value="100" step="1" title="Wait time at dispensing end">
               </div>
             </div>
             <div style="display:flex;align-items:center;gap:8px;margin-top:8px;">
@@ -386,8 +386,8 @@
           <div style="margin-top:24px;padding-top:16px;border-top:1px solid var(--border);">
             <div style="font-size:13px;font-weight:600;color:var(--text-main);margin-bottom:4px;">G54–G59 Work Coordinate Offsets (mm)</div>
             <div style="font-size:11px;color:var(--muted);margin-bottom:10px;">
-              Offset cộng vào tọa độ G-code khi gửi xuống PLC. Chọn hệ tọa độ phôi (G54–G59) và nhập offset X, Y.
-              Chỉ áp dụng cho file G-code, không ảnh hưởng DXF.
+              Offset added to G-code coordinates when sending to PLC. Select work coordinate system (G54–G59) and enter X, Y offset.
+              Only affects G-code files, not DXF.
             </div>
             <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;">
               <label style="font-size:11px;color:var(--muted);">Active WCS:</label>
@@ -417,7 +417,7 @@
           </div>
 
           <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border);font-size:11px;color:var(--muted);">
-            Các cài đặt được lưu vào file app_settings.txt — tự động load khi mở app.
+            All settings are saved to app_settings.txt and auto-loaded on startup.
           </div>
         </div>
       </section>
@@ -428,78 +428,84 @@
           <div class="panel-header">
             <div>
               <div class="panel-title">User Guide</div>
-              <div class="panel-subtitle">Hướng dẫn sử dụng DACDT 2026</div>
+              <div class="panel-subtitle">DACDT 2026 — Gantry Robot Control System</div>
             </div>
           </div>
 
           <div style="margin-top:16px;font-size:13px;color:var(--text-main);">
 
             <h3 style="color:var(--cyan);margin:20px 0 8px;">1. Dashboard</h3>
-            <p>Hiển thị trạng thái kết nối PLC, vị trí 3 trục (X, Y, Z), tốc độ, error code, và Program Monitor theo dõi dòng lệnh đang chạy.</p>
+            <p>Displays PLC connection status, 3-axis positions (X, Y, Z), speed, error codes, and Program Monitor tracking the current running line.</p>
             <ul>
-              <li><b>CONNECT PLC Q</b> — Kết nối PLC Mitsubishi qua MX Component (logical station)</li>
-              <li><b>HOME</b> — Về gốc máy (giữ nút)</li>
-              <li><b>RESET</b> — Reset lỗi trục (giữ nút)</li>
-              <li><b>START ACTION</b> — Bắt đầu chạy chương trình đã nạp (giữ nút)</li>
-              <li><b>EMERGENCY STOP</b> — Dừng khẩn cấp</li>
-              <li><b>Manual Jog</b> — Điều khiển tay bằng nút ←↑→↓ Z+/Z-</li>
+              <li><b>CONNECT PLC Q</b> — Connect to Mitsubishi PLC via MX Component (logical station)</li>
+              <li><b>HOME</b> — Return to machine home (hold button)</li>
+              <li><b>RESET</b> — Reset axis error (hold button)</li>
+              <li><b>START ACTION</b> — Start running the loaded program (hold button)</li>
+              <li><b>EMERGENCY STOP</b> — Emergency stop all axes</li>
+              <li><b>Manual Jog</b> — Manual control using ←↑→↓ Z+/Z- buttons</li>
             </ul>
 
             <h3 style="color:var(--cyan);margin:20px 0 8px;">2. DXF/GCODE RUN</h3>
-            <p>Mở file DXF hoặc G-code, xem bản vẽ 2D, chỉnh sửa G-code, và gửi xuống PLC.</p>
+            <p>Open DXF or G-code files, view 2D drawing, edit G-code, and send to PLC.</p>
             <ul>
-              <li><b>Open</b> — Mở file DXF (.dxf) hoặc G-code (.nc, .gcode, .g)</li>
-              <li><b>New</b> — Tạo file G-code mới (trống)</li>
-              <li><b>Save G-code</b> — Lưu file G-code (chọn đường dẫn lần đầu)</li>
-              <li><b>Send CAD to PLC</b> — Gửi toàn bộ chương trình xuống buffer PLC</li>
-              <li><b>Clear Buffer</b> — Xóa buffer PLC trước khi nạp chương trình mới</li>
+              <li><b>Open</b> — Open DXF (.dxf) or G-code (.nc, .gcode, .g) file</li>
+              <li><b>New</b> — Create new empty G-code file</li>
+              <li><b>Save G-code</b> — Save G-code file (choose path on first save)</li>
+              <li><b>Send CAD to PLC</b> — Send entire program to PLC buffer memory</li>
+              <li><b>Clear Buffer</b> — Clear PLC buffer before loading new program</li>
             </ul>
-            <p><b>Geometry Data</b> — Bảng tọa độ các đoạn Line/Arc/Circle từ file</p>
-            <p><b>Process Table</b> — Bảng lệnh chạy gửi xuống PLC (Motion type, M code, Speed, tọa độ đích)</p>
+            <p><b>Geometry Data</b> — Coordinate table of Line/Arc/Circle segments from file</p>
+            <p><b>Process Table</b> — Command table sent to PLC (Motion type, M code, Speed, end coordinates)</p>
 
-            <h3 style="color:var(--cyan);margin:20px 0 8px;">3. G-code hỗ trợ</h3>
+            <h3 style="color:var(--cyan);margin:20px 0 8px;">3. Supported G-code</h3>
             <table class="data-table compact" style="font-size:12px;margin:8px 0;">
-              <tr><td><b>G00</b></td><td>Di chuyển nhanh (rapid) — dùng tốc độ từ Settings</td></tr>
-              <tr><td><b>G01</b></td><td>Nội suy tuyến tính — tốc độ từ F</td></tr>
-              <tr><td><b>G02</b></td><td>Nội suy cung tròn CW (thuận kim) — I/J hoặc R</td></tr>
-              <tr><td><b>G03</b></td><td>Nội suy cung tròn CCW (ngược kim) — I/J hoặc R</td></tr>
-              <tr><td><b>G54–G59</b></td><td>Chọn hệ tọa độ phôi (offset cộng vào tọa độ)</td></tr>
-              <tr><td><b>G90</b></td><td>Chế độ tọa độ tuyệt đối</td></tr>
-              <tr><td><b>G91</b></td><td>Chế độ tọa độ tương đối</td></tr>
-              <tr><td><b>M03</b></td><td>Bắt đầu dispensing (bật keo)</td></tr>
-              <tr><td><b>M04</b></td><td>Kết thúc dispensing (tắt keo)</td></tr>
+              <tr><td><b>G00</b></td><td>Rapid move — uses speed from Settings</td></tr>
+              <tr><td><b>G01</b></td><td>Linear interpolation — speed from F parameter</td></tr>
+              <tr><td><b>G02</b></td><td>Circular interpolation CW (clockwise) — I/J or R</td></tr>
+              <tr><td><b>G03</b></td><td>Circular interpolation CCW (counter-clockwise) — I/J or R</td></tr>
+              <tr><td><b>G54–G59</b></td><td>Select work coordinate system (offset added to coordinates)</td></tr>
+              <tr><td><b>G90</b></td><td>Absolute coordinate mode</td></tr>
+              <tr><td><b>M03</b></td><td>Start dispensing (glue ON)</td></tr>
+              <tr><td><b>M04</b></td><td>Stop dispensing (glue OFF)</td></tr>
             </table>
-            <p><b>Quy tắc modal:</b> Dòng chỉ có tọa độ (không có G) sẽ dùng lệnh G trước đó. Dòng chỉ có X hoặc Y sẽ giữ nguyên trục còn lại.</p>
 
-            <h3 style="color:var(--cyan);margin:20px 0 8px;">4. DXF hỗ trợ</h3>
-            <p>Đọc được: <b>Line, Polyline2D, Polyline3D, Arc, Circle, Block/Insert</b></p>
-            <p>Tự động gán M03 (đầu path) và M04 (cuối path) cho mỗi quỹ đạo.</p>
+            <h4 style="color:var(--text-main);margin:16px 0 6px;">Coordinate Systems</h4>
+            <ul>
+              <li><b>Machine Home</b> — Fixed reference point on the machine, defined by manufacturer.</li>
+              <li><b>Work Coordinate (G54–G59)</b> — Origin point (X=0, Y=0) set by operator on the workpiece. Offset configured in Settings.</li>
+            </ul>
+
+            <p><b>Modal rules:</b> A line with only coordinates (no G command) uses the previous G command. A line with only X or Y keeps the other axis unchanged.</p>
+
+            <h3 style="color:var(--cyan);margin:20px 0 8px;">4. Supported DXF Entities</h3>
+            <p>Supported: <b>Line, Polyline2D, Polyline3D, Arc, Circle, Block/Insert</b></p>
+            <p>Automatically assigns M03 (path start) and M04 (path end) for each trajectory.</p>
 
             <h3 style="color:var(--cyan);margin:20px 0 8px;">5. Settings</h3>
             <ul>
-              <li><b>G00 Rapid Speed</b> — Tốc độ G00 (mm/min), áp dụng cho tất cả lệnh G00</li>
-              <li><b>Workspace Size</b> — Kích thước vùng làm việc hiển thị trên bản vẽ 2D</li>
-              <li><b>DXF Offset & Speed</b> — Offset X/Y, Speed, Dwell M03/M04 cho file DXF</li>
-              <li><b>G54–G59 WCS Offsets</b> — Offset tọa độ cho từng hệ tọa độ phôi (G-code)</li>
+              <li><b>G00 Rapid Speed</b> — Speed for all G00 commands (mm/min)</li>
+              <li><b>Workspace Size</b> — Work area dimensions shown on 2D drawing</li>
+              <li><b>DXF Offset & Speed</b> — Offset X/Y, Speed, Dwell M03/M04 for DXF files</li>
+              <li><b>G54–G59 WCS Offsets</b> — Coordinate offsets for each work coordinate system (G-code)</li>
             </ul>
-            <p>Tất cả settings được lưu vào <code>app_settings.txt</code> và tự động load khi mở app.</p>
+            <p>All settings are saved to <code>app_settings.txt</code> and auto-loaded on startup.</p>
 
-            <h3 style="color:var(--cyan);margin:20px 0 8px;">6. Quy trình vận hành</h3>
+            <h3 style="color:var(--cyan);margin:20px 0 8px;">6. Operating Procedure</h3>
             <ol>
-              <li>Kết nối PLC (nhấn CONNECT PLC Q)</li>
-              <li>Mở file DXF hoặc G-code (tab DXF/GCODE RUN → Open)</li>
-              <li>Kiểm tra Process Table và bản vẽ 2D</li>
-              <li>Cài đặt Speed, Offset nếu cần (tab Settings)</li>
-              <li>Nhấn <b>Clear Buffer</b> → <b>Send CAD to PLC</b></li>
-              <li>Nhấn giữ <b>START ACTION</b> để chạy</li>
-              <li>Theo dõi Program Monitor trên Dashboard</li>
+              <li>Connect PLC (press CONNECT PLC Q)</li>
+              <li>Open DXF or G-code file (DXF/GCODE RUN tab → Open)</li>
+              <li>Verify Process Table and 2D drawing</li>
+              <li>Configure Speed, Offset if needed (Settings tab)</li>
+              <li>Press <b>Clear Buffer</b> → <b>Send CAD to PLC</b></li>
+              <li>Hold <b>START ACTION</b> to run</li>
+              <li>Monitor progress on Dashboard (Program Monitor)</li>
             </ol>
 
-            <h3 style="color:var(--cyan);margin:20px 0 8px;">7. Phím tắt & Thao tác</h3>
+            <h3 style="color:var(--cyan);margin:20px 0 8px;">7. Controls & Shortcuts</h3>
             <ul>
-              <li><b>Cuộn chuột</b> trên bản vẽ 2D — Zoom in/out</li>
-              <li><b>Kéo chuột</b> trên bản vẽ 2D — Pan (di chuyển)</li>
-              <li><b>EXIT APP</b> (sidebar) — Thoát chương trình</li>
+              <li><b>Mouse wheel</b> on 2D drawing — Zoom in/out</li>
+              <li><b>Mouse drag</b> on 2D drawing — Pan (move view)</li>
+              <li><b>EXIT APP</b> (sidebar) — Close application</li>
             </ul>
 
           </div>
