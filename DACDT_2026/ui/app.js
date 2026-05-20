@@ -153,16 +153,10 @@ function cacheDom() {
 }
 
 function bindEvents() {
-  dom.topViewButtons.forEach(b => b.addEventListener("click", async () => {
-    if (b.dataset.view === "settings") {
-      if (!settingsRole) { const ok = await promptSettingsPassword(); if (!ok) return; applyPermissions(); }
-    }
+  dom.topViewButtons.forEach(b => b.addEventListener("click", () => {
     state.view = b.dataset.view; applyView(state.view); post("switchView", { view: state.view });
   }));
-  dom.sideViewButtons.forEach(b => b.addEventListener("click", async () => {
-    if (b.dataset.view === "settings") {
-      if (!settingsRole) { const ok = await promptSettingsPassword(); if (!ok) return; applyPermissions(); }
-    }
+  dom.sideViewButtons.forEach(b => b.addEventListener("click", () => {
     state.view = b.dataset.view; applyView(state.view); post("switchView", { view: state.view });
   }));
   dom.placeholderButtons.forEach(b => b.addEventListener("click", () => showToast("info", b.dataset.placeholder, "Mục này đang để placeholder.")));
@@ -439,11 +433,7 @@ function bindEvents() {
   }
 }
 
-// ── Settings Password Gate ───────────────────────────────────────────────
-let settingsRole = ""; // "" = chưa login, "admin", "member"
-const ADMIN_PASSWORD = "DACDT2026";
-let memberPassword = ""; // load từ settings
-
+// ── App Controls ─────────────────────────────────────────────────────────
 function initLogin() {
   const exitBtn = document.getElementById("exit-app-btn");
   if (exitBtn) {
@@ -453,54 +443,9 @@ function initLogin() {
       }
     });
   }
-
-  // Member password save button
-  const memberPwdBtn = document.getElementById("set-member-pwd-btn");
-  if (memberPwdBtn) {
-    memberPwdBtn.addEventListener("click", () => {
-      const input = document.getElementById("member-password-input");
-      if (input) {
-        memberPassword = input.value;
-        post("setProcessValue", { key: "memberPassword", value: memberPassword });
-        const st = document.getElementById("member-pwd-status");
-        if (st) { st.textContent = "✓ Saved"; setTimeout(() => { st.textContent = ""; }, 3000); }
-      }
-    });
-  }
 }
 
-function promptSettingsPassword() {
-  return new Promise((resolve) => {
-    const pwd = prompt("Nhập mật khẩu để vào Settings:");
-    if (pwd === null) { resolve(false); return; }
-    if (pwd === ADMIN_PASSWORD) {
-      settingsRole = "admin";
-      resolve(true);
-    } else if (memberPassword && pwd === memberPassword) {
-      settingsRole = "member";
-      resolve(true);
-    } else {
-      alert("Mật khẩu không đúng!");
-      resolve(false);
-    }
-  });
-}
-
-function applyPermissions() {
-  // Member: ẩn Workspace Size + Member Management
-  const wsBtn = document.getElementById("set-workspace-btn");
-  if (wsBtn) {
-    const section = wsBtn.parentElement.parentElement;
-    if (section) {
-      section.style.opacity = settingsRole === "admin" ? "1" : "0.4";
-      section.style.pointerEvents = settingsRole === "admin" ? "auto" : "none";
-    }
-  }
-  const memberMgmt = document.getElementById("member-management");
-  if (memberMgmt) {
-    memberMgmt.style.display = settingsRole === "admin" ? "block" : "none";
-  }
-}
+function applyPermissions() {}
 
 document.addEventListener("DOMContentLoaded", () => { initLogin(); });
 
@@ -708,8 +653,6 @@ function renderDxf() {
     if (wcsOx) syncInputValue(wcsOx, String(activeData.x || 0));
     if (wcsOy) syncInputValue(wcsOy, String(activeData.y || 0));
   }
-  // Sync member password
-  if (state.dxf.memberPassword) memberPassword = state.dxf.memberPassword;
 
   const importBtn = document.getElementById("import-cad-to-process-button");
   if (importBtn) {

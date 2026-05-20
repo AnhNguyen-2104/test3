@@ -127,7 +127,7 @@ namespace DACDT_2026
                     {
                         loadTask.TrySetException(ex);
                     }
-                }, 4 * 1024 * 1024); // 4MB stack
+                }, 16 * 1024 * 1024); // 16MB stack — netDxf cần stack lớn khi parse file DXF phức tạp
                 loadThread.IsBackground = true;
                 loadThread.Start();
                 await loadTask.Task;

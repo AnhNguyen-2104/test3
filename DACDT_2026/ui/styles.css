@@ -257,10 +257,10 @@ html.theme-light .sidebar { background: #f6f8fd; }
   padding: 8px 12px; font-size: 12px; font-weight: 800;
   letter-spacing: 1px; color: #fff;
 }
-.axis-header.accent-axis-1 { background: linear-gradient(90deg, #16a34a, #15803d); }
-.axis-header.accent-axis-2 { background: linear-gradient(90deg, #2563eb, #1d4ed8); }
-.axis-header.accent-axis-3 { background: linear-gradient(90deg, #dc2626, #b91c1c); }
-.axis-header.accent-axis-4 { background: linear-gradient(90deg, #d97706, #b45309); }
+.axis-header.accent-axis-1 { background: var(--panel-3, #334155); }
+.axis-header.accent-axis-2 { background: var(--panel-3, #334155); }
+.axis-header.accent-axis-3 { background: var(--panel-3, #334155); }
+.axis-header.accent-axis-4 { background: var(--panel-3, #334155); }
 
 .axis-body { padding: 10px 12px; }
 

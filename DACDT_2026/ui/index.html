@@ -18,7 +18,7 @@
   <div class="app-shell">
     <header class="topbar">
       <div class="brand-block">
-        <div class="brand-title">PRECISION SCADA</div>
+        <div class="brand-title">DACDT 2026</div>
         <nav class="top-nav">
           <button class="nav-link is-active" data-view="control">DASHBOARD</button>
           <button class="nav-link" data-view="logs">LOGS</button>
@@ -35,11 +35,11 @@
     </header>
 
     <aside class="sidebar">
-      <div class="unit-card">
-        <div class="unit-badge">01</div>
+      <div class="unit-card" style="padding:8px 10px;align-items:center;gap:10px;">
+        <img src="AML.jpg" alt="AML" style="width:50px;height:50px;border-radius:6px;object-fit:contain;">
         <div>
-          <div class="unit-title">Unit 01</div>
-          <div class="unit-subtitle" id="sidebar-status">Mitsu: DC</div>
+          <div class="unit-title" style="font-size:14px;font-weight:800;">AML</div>
+          <div id="sidebar-status" style="font-size:10px;color:var(--muted);">Mitsu: DC</div>
         </div>
       </div>
 
@@ -108,10 +108,10 @@
               <button id="connect-button" class="primary-button full-width connect-btn-q">CONNECT PLC Q</button>
               
               <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px;">
-                <button id="go-home-btn" class="primary-button compact" style="background: var(--warning-color, #eab308); color: black;">HOME <span style="font-size:9px;opacity:0.7">(M502)</span></button>
-                <button id="reset-error-btn" class="primary-button compact" style="background: #ef4444; color: white;">RESET <span style="font-size:9px;opacity:0.7">(M300)</span></button>
+                <button id="go-home-btn" class="primary-button compact">HOME <span style="font-size:9px;opacity:0.7">(M502)</span></button>
+                <button id="reset-error-btn" class="primary-button compact">RESET <span style="font-size:9px;opacity:0.7">(M300)</span></button>
               </div>
-              <button id="start-btn" class="primary-button full-width" style="margin-top: 8px; background: #22c55e; color: white;">START ACTION <span style="font-size:9px;opacity:0.7">(M2000)</span></button>
+              <button id="start-btn" class="primary-button full-width" style="margin-top: 8px;">START ACTION <span style="font-size:9px;opacity:0.7">(M2000)</span></button>
             </div>
 
             <div id="connection-meta" class="muted-text" style="margin-top:12px;">MX Component logical station: 0</div>
@@ -416,19 +416,6 @@
 
           <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border);font-size:11px;color:var(--muted);">
             Các cài đặt được lưu vào file app_settings.txt — tự động load khi mở app.
-          </div>
-
-          <!-- Member Management (admin only) -->
-          <div id="member-management" style="margin-top:24px;padding-top:16px;border-top:1px solid var(--border);">
-            <div style="font-size:13px;font-weight:600;color:var(--text-main);margin-bottom:4px;">Member Management</div>
-            <div style="font-size:11px;color:var(--muted);margin-bottom:10px;">
-              Tạo mật khẩu cho thành viên. Thành viên chỉ xem được Settings, không sửa Workspace Size.
-            </div>
-            <div style="display:flex;gap:8px;align-items:center;">
-              <input id="member-password-input" class="text-input" type="text" placeholder="Mật khẩu thành viên" style="width:200px;">
-              <button id="set-member-pwd-btn" class="primary-button" style="background:var(--cyan);color:#fff;">Save Member Password</button>
-              <span id="member-pwd-status" style="font-size:11px;color:var(--muted);"></span>
-            </div>
           </div>
         </div>
       </section>
