@@ -104,6 +104,7 @@ namespace DACDT_2026
         private readonly double[] wcsOffsetX = new double[6]; // G54=0, G55=1, ..., G59=5
         private readonly double[] wcsOffsetY = new double[6];
         private string rawGcodeText = string.Empty;
+        private QD75RingBufferRunner activeRingRunner; // Ring buffer runner cho >600 điểm
 
         // UI state
         private volatile bool webReady;
@@ -124,11 +125,13 @@ namespace DACDT_2026
         {
             InitializeComponent();
 
-            Text          = "Gantry SCADA Robot Control";
+            Text          = "DACDT 2026";
             StartPosition = FormStartPosition.CenterScreen;
             MinimumSize   = new Size(1440, 860);
             WindowState   = FormWindowState.Maximized;
-            FormBorderStyle = FormBorderStyle.None;
+            MaximizeBox   = false;
+            MinimizeBox   = false;
+            ControlBox    = false;
             BackColor     = Color.FromArgb(10, 15, 30);
 
             webView = new WebView2
@@ -279,8 +282,16 @@ namespace DACDT_2026
         }
 
         // ── Lifecycle ────────────────────────────────────────────────────────────
+        private bool allowClose = false; // Chỉ cho phép đóng khi nhấn EXIT APP
+
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
+            if (!allowClose && e.CloseReason == CloseReason.UserClosing)
+            {
+                e.Cancel = true; // Chặn Alt+F4 và X button
+                return;
+            }
+
             isClosing = true;
             webReady  = false;
 

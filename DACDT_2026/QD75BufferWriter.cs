@@ -128,6 +128,8 @@ namespace DACDT_2026
             // 3-axis helical sub-point
             ABS_HelicalSub     = 0x20,
             INC_HelicalSub     = 0x21,
+            // JUMP command (used for Ring Buffer / continuous trajectory >600 points)
+            JUMP               = 0x82,
         }
 
         /// <summary>Da.5 Axis to interpolate (b3–b2).</summary>

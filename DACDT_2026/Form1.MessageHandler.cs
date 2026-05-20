@@ -225,7 +225,10 @@ namespace DACDT_2026
 
                     case "exitApp":
                         isClosing = true;
-                        this.BeginInvoke(new System.Action(() => System.Windows.Forms.Application.Exit()));
+                        this.BeginInvoke(new System.Action(() => { 
+                            ((Form1)this).allowClose = true;
+                            this.Close();
+                        }));
                         break;
                 }
             }

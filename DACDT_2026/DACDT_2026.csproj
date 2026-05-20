@@ -126,6 +126,8 @@
     </Compile>
     <Compile Include="PLCCommunication.cs" />
     <Compile Include="QD75BufferWriter.cs" />
+    <Compile Include="QD75RingBufferRunner.cs" />
+    <Compile Include="SimpleDxfParser.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <EmbeddedResource Include="Form1.resx">

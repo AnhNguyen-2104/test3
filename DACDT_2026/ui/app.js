@@ -655,17 +655,28 @@ function renderControl() {
   updatePositionMarker();
 
   // Update highlight completed paths based on marker position
-  const currDataNo = (axes[0] && axes[0].currentDataNo && axes[0].currentDataNo !== "--") ? parseInt(axes[0].currentDataNo, 10) : 0;
-  if (currDataNo > 0) {
-    const allLines = document.querySelectorAll("#cad-transform-group .cad-line");
-    allLines.forEach((line, idx) => {
-      // Primitive index < currentDataNo means robot has passed this segment
-      if (idx < currDataNo - 1) {
-        if (!line.classList.contains("cad-line-done")) {
+  const posXStr2 = axes[0] && axes[0].currentPos ? axes[0].currentPos : null;
+  const posYStr2 = axes[1] && axes[1].currentPos ? axes[1].currentPos : null;
+  if (posXStr2 && posYStr2 && posXStr2 !== "--" && posYStr2 !== "--") {
+    const mx = parseFloat(posXStr2);
+    const my = parseFloat(posYStr2);
+    if (!isNaN(mx) && !isNaN(my)) {
+      const prims = state.dxf && state.dxf.primitives ? state.dxf.primitives : [];
+      const allLines = document.querySelectorAll("#cad-transform-group .cad-line");
+      allLines.forEach((line, idx) => {
+        if (line.classList.contains("cad-line-done")) return; // Already done
+        const prim = prims[idx];
+        if (!prim || !prim.points || prim.points.length < 2) return;
+        const endPt = prim.points[prim.points.length - 1];
+        // Marker đã đi qua nếu khoảng cách đến end point < 1mm
+        const dx = mx - (endPt.x || 0);
+        const dy = my - (endPt.y || 0);
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < 1.0) {
           line.classList.add("cad-line-done");
         }
-      }
-    });
+      });
+    }
   }
 }
 
@@ -686,12 +697,31 @@ function updatePositionMarker() {
   if (isNaN(posX) || isNaN(posY)) return;
 
   const bounds = state.dxf && state.dxf.bounds ? state.dxf.bounds : { left: 0, top: 0, width: 100, height: 100 };
+  const isGcodeView = (state.dxf && state.dxf.fileKind || "").toUpperCase() === "GCODE";
+  let vox = 0, voy = 0;
+  if (isGcodeView) {
+    const wcsData = state.dxf.wcsOffsets || {};
+    const aw = state.dxf.activeWcs || "G54";
+    const wa = wcsData[aw] || {};
+    vox = wa.x || 0; voy = wa.y || 0;
+  } else {
+    vox = state.dxf.offsetX || 0; voy = state.dxf.offsetY || 0;
+  }
   const W = 1000, H = 560, pad = 28;
-  const ww = Math.max(bounds.width || 0, 1), wh = Math.max(bounds.height || 0, 1);
+  const drawLeft = bounds.left + vox;
+  const drawTop = bounds.top + voy;
+  const drawRight = drawLeft + (bounds.width || 0);
+  const drawBottom = drawTop + (bounds.height || 0);
+  const effLeft = Math.min(0, drawLeft);
+  const effTop = Math.min(0, drawTop);
+  const effRight = Math.max(drawRight, state.dxf.workspaceWidth || 170);
+  const effBottom = Math.max(drawBottom, state.dxf.workspaceHeight || 170);
+  const ww = Math.max(effRight - effLeft, 1), wh = Math.max(effBottom - effTop, 1);
   const sc = Math.min((W - pad * 2) / ww, (H - pad * 2) / wh);
-  const ox = (W - ww * sc) / 2, oy = (H - wh * sc) / 2;
-  const px = ox + (posX - bounds.left) * sc;
-  const py = H - oy - (posY - bounds.top) * sc;
+  const oxv = (W - ww * sc) / 2, oyv = (H - wh * sc) / 2;
+  // Marker dùng tọa độ thực từ PLC (tuyệt đối)
+  const px = oxv + (posX - effLeft) * sc;
+  const py = H - oyv - (posY - effTop) * sc;
 
   const marker = document.createElementNS("http://www.w3.org/2000/svg", "g");
   marker.setAttribute("class", "cad-pos-marker");
@@ -725,6 +755,22 @@ function renderDxf() {
   syncInputValue(dom.cadFile, state.dxf.fileName || "");
   const speedInput = document.getElementById("global-speed-input");
   if (speedInput && state.dxf.globalSpeed) syncInputValue(speedInput, state.dxf.globalSpeed);
+
+  // Sync all settings inputs from backend state
+  const g0Input = document.getElementById("g0-speed-input");
+  if (g0Input && state.dxf.rapidSpeed) syncInputValue(g0Input, state.dxf.rapidSpeed);
+  const wsWInput = document.getElementById("workspace-width-input");
+  if (wsWInput && state.dxf.workspaceWidth) syncInputValue(wsWInput, String(state.dxf.workspaceWidth));
+  const wsHInput = document.getElementById("workspace-height-input");
+  if (wsHInput && state.dxf.workspaceHeight) syncInputValue(wsHInput, String(state.dxf.workspaceHeight));
+  const oxInput = document.getElementById("offset-x-input");
+  if (oxInput && state.dxf.offsetX != null) syncInputValue(oxInput, String(state.dxf.offsetX));
+  const oyInput = document.getElementById("offset-y-input");
+  if (oyInput && state.dxf.offsetY != null) syncInputValue(oyInput, String(state.dxf.offsetY));
+  const dwM3Input = document.getElementById("dwell-m3-input");
+  if (dwM3Input && state.dxf.globalDwellM3) syncInputValue(dwM3Input, state.dxf.globalDwellM3);
+  const dwM4Input = document.getElementById("dwell-m4-input");
+  if (dwM4Input && state.dxf.globalDwellM4) syncInputValue(dwM4Input, state.dxf.globalDwellM4);
 
   // Sync WCS settings
   const wcsSelectEl = document.getElementById("wcs-select");
@@ -855,12 +901,39 @@ function renderCadPreview() {
   const isGcode = (state.dxf.fileKind || "").toUpperCase() === "GCODE";
   if (!primitives.length) { dom.cadPreview.innerHTML = ""; dom.cadPlaceholder.classList.remove("hidden"); return; }
   dom.cadPlaceholder.classList.add("hidden");
+
+  // Xác định offset hiển thị (giống thực tế gửi PLC)
+  let viewOffsetX = 0, viewOffsetY = 0;
+  if (isGcode) {
+    const wcsData = state.dxf.wcsOffsets || {};
+    const activeWcs = state.dxf.activeWcs || "G54";
+    const wcsActive = wcsData[activeWcs] || {};
+    viewOffsetX = wcsActive.x || 0;
+    viewOffsetY = wcsActive.y || 0;
+  } else {
+    viewOffsetX = state.dxf.offsetX || 0;
+    viewOffsetY = state.dxf.offsetY || 0;
+  }
+
   const W = 1000, H = 560;
   const zPanelH = 0;
   const xyH = H - zPanelH;
-  const pad = 28, ww = Math.max(bounds.width || 0, 1), wh = Math.max(bounds.height || 0, 1);
+  const pad = 28;
+  // Bounds mở rộng để chứa cả bản vẽ (có offset) và gốc tọa độ (0,0)
+  const drawLeft = bounds.left + viewOffsetX;
+  const drawTop = bounds.top + viewOffsetY;
+  const drawRight = drawLeft + (bounds.width || 0);
+  const drawBottom = drawTop + (bounds.height || 0);
+  const effLeft = Math.min(0, drawLeft);
+  const effTop = Math.min(0, drawTop);
+  const effRight = Math.max(drawRight, state.dxf.workspaceWidth || 170);
+  const effBottom = Math.max(drawBottom, state.dxf.workspaceHeight || 170);
+  const ww = Math.max(effRight - effLeft, 1), wh = Math.max(effBottom - effTop, 1);
   const sc = Math.min((W - pad * 2) / ww, (xyH - pad * 2) / wh), ox = (W - ww * sc) / 2, oy = (xyH - wh * sc) / 2;
-  const proj = p => ({ x: ox + (p.x - bounds.left) * sc, y: xyH - oy - (p.y - bounds.top) * sc });
+  // projAbs: project tọa độ tuyệt đối (cho marker, workspace, trục)
+  const projAbs = p => ({ x: ox + (p.x - effLeft) * sc, y: xyH - oy - (p.y - effTop) * sc });
+  // proj: project tọa độ file + offset (cho bản vẽ CAD)
+  const proj = p => projAbs({ x: p.x + viewOffsetX, y: p.y + viewOffsetY });
 
   function primIsRapid(pr) {
     const st = (pr.sourceType || "").toLowerCase();
@@ -895,12 +968,12 @@ function renderCadPreview() {
 
   const wsW = state.dxf.workspaceWidth || 170;
   const wsH = state.dxf.workspaceHeight || 170;
-  const p0 = proj({ x: 0, y: 0 });
-  const px = proj({ x: wsW, y: 0 });
-  const py = proj({ x: 0, y: wsH });
-  const pxy = proj({ x: wsW, y: wsH });
-  const pxArrow = proj({ x: 20, y: 0 });
-  const pyArrow = proj({ x: 0, y: 20 });
+  const p0 = projAbs({ x: 0, y: 0 });
+  const px = projAbs({ x: wsW, y: 0 });
+  const py = projAbs({ x: 0, y: wsH });
+  const pxy = projAbs({ x: wsW, y: wsH });
+  const pxArrow = projAbs({ x: 20, y: 0 });
+  const pyArrow = projAbs({ x: 0, y: 20 });
 
   const originMarker = `<g class="cad-workspace-limit">
     <polygon points="${p0.x.toFixed(2)},${p0.y.toFixed(2)} ${px.x.toFixed(2)},${px.y.toFixed(2)} ${pxy.x.toFixed(2)},${pxy.y.toFixed(2)} ${py.x.toFixed(2)},${py.y.toFixed(2)}" fill="none" stroke="rgba(50, 200, 255, 0.3)" stroke-width="1.8" stroke-dasharray="4,3" />

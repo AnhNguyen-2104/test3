@@ -24,26 +24,40 @@ namespace DACDT_2026
 
         /// <summary>
         /// Hiển thị OpenFileDialog đồng bộ trên UI thread.
-        /// Phải được gọi từ UI thread — không dùng async/await bên trong.
+        /// Tạm đổi FormBorderStyle để dialog không crash với FormBorderStyle.None.
         /// </summary>
         private string ShowOpenFileDialog()
         {
-            using (var dialog = new OpenFileDialog())
+            plcPollTimer.Stop();
+            isPreviewingGcode = true;
+            webView.Visible = false; // Tạm ẩn WebView2 để ngăn message gửi khi dialog mở
+
+            try
             {
-                dialog.Filter           = "CAD / G-code files (*.dxf;*.gcode;*.g;*.gc;*.nc;*.ngc;*.cnc;*.tap)|*.dxf;*.gcode;*.g;*.gc;*.nc;*.ngc;*.cnc;*.tap|DXF files (*.dxf)|*.dxf|G-code files (*.gcode;*.g;*.gc;*.nc;*.ngc;*.cnc;*.tap)|*.gcode;*.g;*.gc;*.nc;*.ngc;*.cnc;*.tap|All files (*.*)|*.*";
-                dialog.Title            = "Open DXF or G-code file";
-                dialog.CheckFileExists  = true;
-                dialog.Multiselect      = false;
-                dialog.RestoreDirectory = true;
-                dialog.FileName         = string.Empty;
+                using (var dialog = new OpenFileDialog())
+                {
+                    dialog.Filter           = "CAD / G-code files (*.dxf;*.gcode;*.g;*.gc;*.nc;*.ngc;*.cnc;*.tap)|*.dxf;*.gcode;*.g;*.gc;*.nc;*.ngc;*.cnc;*.tap|DXF files (*.dxf)|*.dxf|G-code files (*.gcode;*.g;*.gc;*.nc;*.ngc;*.cnc;*.tap)|*.gcode;*.g;*.gc;*.nc;*.ngc;*.cnc;*.tap|All files (*.*)|*.*";
+                    dialog.Title            = "Open DXF or G-code file";
+                    dialog.CheckFileExists  = true;
+                    dialog.Multiselect      = false;
+                    dialog.RestoreDirectory = true;
+                    dialog.FileName         = string.Empty;
 
-                string initialDir = activeCadDocument?.DirectoryPath;
-                if (!string.IsNullOrWhiteSpace(initialDir) && Directory.Exists(initialDir))
-                    dialog.InitialDirectory = initialDir;
+                    string initialDir = activeCadDocument?.DirectoryPath;
+                    if (!string.IsNullOrWhiteSpace(initialDir) && Directory.Exists(initialDir))
+                        dialog.InitialDirectory = initialDir;
 
-                return dialog.ShowDialog(this) == DialogResult.OK
-                    ? Path.GetFullPath(dialog.FileName)
-                    : null;
+                    return dialog.ShowDialog(this) == DialogResult.OK
+                        ? Path.GetFullPath(dialog.FileName)
+                        : null;
+                }
+            }
+            finally
+            {
+                webView.Visible = true;
+                isPreviewingGcode = false;
+                if (plcComm != null && plcComm.IsConnected && !isClosing)
+                    plcPollTimer.Start();
             }
         }
 
@@ -127,9 +141,15 @@ namespace DACDT_2026
                     {
                         loadTask.TrySetException(ex);
                     }
-                }, 16 * 1024 * 1024); // 16MB stack — netDxf cần stack lớn khi parse file DXF phức tạp
+                }, 2 * 1024 * 1024); // 2MB stack — SimpleDxfParser không đệ quy
                 loadThread.IsBackground = true;
                 loadThread.Start();
+                bool completed = loadThread.Join(30000);
+                if (!completed)
+                {
+                    try { loadThread.Abort(); } catch { }
+                    throw new Exception("File loading timed out after 30 seconds.");
+                }
                 await loadTask.Task;
 
                 // ── Cập nhật state trên UI thread ────────────────────────────────
@@ -215,6 +235,12 @@ namespace DACDT_2026
                 }, 4 * 1024 * 1024); // 4MB stack
                 previewThread.IsBackground = true;
                 previewThread.Start();
+                bool previewDone = previewThread.Join(10000); // 10s timeout for preview
+                if (!previewDone)
+                {
+                    previewThread.Abort();
+                    throw new Exception("G-code preview timed out.");
+                }
                 await previewTask.Task;
 
                 activeCadDocument = previewDoc;
@@ -307,10 +333,9 @@ namespace DACDT_2026
 
         private string ShowSaveGcodeDialog()
         {
-            // Tạm đổi border style để dialog không crash với FormBorderStyle.None
-            var originalStyle = this.FormBorderStyle;
-            this.FormBorderStyle = FormBorderStyle.Sizable;
-            this.WindowState = FormWindowState.Maximized;
+            plcPollTimer.Stop();
+            webView.Visible = false;
+
             string result = null;
             try
             {
@@ -325,8 +350,9 @@ namespace DACDT_2026
             }
             finally
             {
-                this.FormBorderStyle = originalStyle;
-                this.WindowState = FormWindowState.Maximized;
+                webView.Visible = true;
+                if (plcComm != null && plcComm.IsConnected && !isClosing)
+                    plcPollTimer.Start();
             }
             return result;
         }
@@ -674,57 +700,89 @@ namespace DACDT_2026
                 }
                 else
                 {
-                    await LogUIAsync("PLC", "Đã xóa buffer cũ thành công.");
+                    await LogUIAsync("PLC", "Buffer cleared successfully.");
                 }
 
-                // ── BƯỚC 1: Master axis (Axis 1 / X): bulk write toàn bộ buffer G2000+ ──
-                // Chạy animation 0→45% song song với bulk write để progress bar mượt
-                var axisXTask = Task.Run(() =>
-                    QD75BufferWriter.WritePositioningDataBulk(plcComm, 0, dataRows, writeStartNo: false));
-
-                await AnimateProgressAsync(from: 0, to: 45, durationMs: 800, completionTask: axisXTask);
-                var sendResult = await axisXTask;
-
-                foreach (var wr in sendResult.WriteResults)
+                // ── Kiểm tra: nếu >600 điểm → dùng Ring Buffer ──────────────────
+                if (dataRows.Count > 600)
                 {
-                    AddLogEntry(wr.Address, wr.Value, "Write", wr.Status, wr.Message);
-                    if (!wr.Status.StartsWith("OK"))
-                        await NotifyAsync("error", "Telemetry [Axis1]", $"{wr.Address}: {wr.Message}");
+                    await LogUIAsync("PLC", $"Ring Buffer mode: {dataRows.Count} points (>600). Loading first batch + JUMP...");
+                    _ = SendProgressAsync(true, 10);
+
+                    // Tạo ring buffer runner
+                    var ringRunner = new QD75RingBufferRunner(plcComm, dataRows);
+                    activeRingRunner = ringRunner;
+                    ringRunner.OnLog += async (msg) => await LogUIAsync("Ring", msg);
+                    ringRunner.OnProgress += async (loaded, total) =>
+                    {
+                        int pct = (int)((double)loaded / total * 100);
+                        _ = SendProgressAsync(true, pct);
+                    };
+                    ringRunner.OnComplete += async () =>
+                    {
+                        await NotifyAsync("success", "PLC", $"Ring buffer complete — all {dataRows.Count} points executed.");
+                        _ = SendProgressAsync(false, 0);
+                    };
+                    ringRunner.OnError += async (err) =>
+                    {
+                        await NotifyAsync("error", "Ring Buffer", err);
+                        _ = SendProgressAsync(false, 0);
+                    };
+
+                    // Start ring buffer (nạp 600 điểm đầu + JUMP, sau đó monitor Md.44)
+                    _ = ringRunner.StartAsync(); // Fire-and-forget — chạy nền
+
+                    await NotifyAsync("success", "PLC",
+                        $"Ring Buffer started: {dataRows.Count} points. First 600 loaded. Monitoring Md.44 for refill. Press START/RUN.");
                 }
-
-                _ = SendProgressAsync(true, 50);
-
-                if (!sendResult.Success)
+                else
                 {
-                    await NotifyAsync("error", "Telemetry [Axis1]", "Failed to load Axis 1 buffer.");
-                    return;
+                    // ── ≤600 điểm: gửi bình thường ──────────────────────────────────
+                    var axisXTask = Task.Run(() =>
+                        QD75BufferWriter.WritePositioningDataBulk(plcComm, 0, dataRows, writeStartNo: false));
+
+                    await AnimateProgressAsync(from: 0, to: 45, durationMs: 800, completionTask: axisXTask);
+                    var sendResult = await axisXTask;
+
+                    foreach (var wr in sendResult.WriteResults)
+                    {
+                        AddLogEntry(wr.Address, wr.Value, "Write", wr.Status, wr.Message);
+                        if (!wr.Status.StartsWith("OK"))
+                            await NotifyAsync("error", "Telemetry [Axis1]", $"{wr.Address}: {wr.Message}");
+                    }
+
+                    _ = SendProgressAsync(true, 50);
+
+                    if (!sendResult.Success)
+                    {
+                        await NotifyAsync("error", "Telemetry [Axis1]", "Failed to load Axis 1 buffer.");
+                        return;
+                    }
+
+                    var axisYTask = Task.Run(() =>
+                        QD75BufferWriter.WriteSlaveAxisDataBulk(plcComm, dataRows, slaveBaseG: 8000));
+
+                    await AnimateProgressAsync(from: 50, to: 95, durationMs: 600, completionTask: axisYTask);
+                    var slaveResult = await axisYTask;
+
+                    foreach (var wr in slaveResult.WriteResults)
+                    {
+                        AddLogEntry(wr.Address, wr.Value, "Write", wr.Status, wr.Message);
+                        if (!wr.Status.StartsWith("OK"))
+                            await NotifyAsync("error", "Telemetry [Axis2]", $"{wr.Address}: {wr.Message}");
+                    }
+
+                    _ = SendProgressAsync(true, 100);
+
+                    if (!slaveResult.Success)
+                    {
+                        await NotifyAsync("error", "Telemetry [Axis2]", "Failed to load Axis 2 buffer.");
+                        return;
+                    }
+
+                    await NotifyAsync("success", "PLC",
+                        $"Loaded {sendResult.RowCount} commands → Axis 1 (G2000+) & Axis 2 (G8000+). Press START/RUN to execute.");
                 }
-
-                // ── BƯỚC 2: Slave axis (Axis 2 / Y): bulk write G8000+ ──────────────────
-                // Chạy animation 50→95% song song với bulk write
-                var axisYTask = Task.Run(() =>
-                    QD75BufferWriter.WriteSlaveAxisDataBulk(plcComm, dataRows, slaveBaseG: 8000));
-
-                await AnimateProgressAsync(from: 50, to: 95, durationMs: 600, completionTask: axisYTask);
-                var slaveResult = await axisYTask;
-
-                foreach (var wr in slaveResult.WriteResults)
-                {
-                    AddLogEntry(wr.Address, wr.Value, "Write", wr.Status, wr.Message);
-                    if (!wr.Status.StartsWith("OK"))
-                        await NotifyAsync("error", "Telemetry [Axis2]", $"{wr.Address}: {wr.Message}");
-                }
-
-                _ = SendProgressAsync(true, 100);
-
-                if (!slaveResult.Success)
-                {
-                    await NotifyAsync("error", "Telemetry [Axis2]", "Failed to load Axis 2 buffer.");
-                    return;
-                }
-
-                await NotifyAsync("success", "PLC",
-                    $"Loaded {sendResult.RowCount} commands → Axis 1 (G2000+) & Axis 2 (G8000+). Press START/RUN to execute.");
             }
             finally
             {
