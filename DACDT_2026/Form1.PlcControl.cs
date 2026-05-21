@@ -273,6 +273,7 @@ namespace DACDT_2026
                             axErrorCode[i]     = mon[OffErrorCode];
                             axWarningCode[i]   = mon[OffWarningCode];
                             axAxisStatus[i]    = mon[OffAxisStatus];
+                            axSignals[i]       = mon[16]; // Md.30: External signals (b0=RLS, b1=FLS, b6=DOG)
                             axCurrentDataNo[i] = mon[35]; // Md.44
                             axLastDataNo[i]    = mon[37]; // Md.46
 

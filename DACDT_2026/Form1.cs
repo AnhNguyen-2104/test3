@@ -70,6 +70,7 @@ namespace DACDT_2026
         private readonly int[] axErrorCode    = new int[4];
         private readonly int[] axWarningCode  = new int[4];
         private readonly int[] axAxisStatus   = new int[4];
+        private readonly int[] axSignals      = new int[4]; // Md.30: b0=Limit-, b1=Limit+, b6=Home(DOG)
         private readonly int[] axCurrentDataNo = new int[4];
         private readonly int[] axLastDataNo    = new int[4];
         private readonly int[] axErrorReset   = new int[4];
@@ -129,9 +130,7 @@ namespace DACDT_2026
             StartPosition = FormStartPosition.CenterScreen;
             MinimumSize   = new Size(1440, 860);
             WindowState   = FormWindowState.Maximized;
-            MaximizeBox   = false;
-            MinimizeBox   = false;
-            ControlBox    = false;
+            FormBorderStyle = FormBorderStyle.None;
             BackColor     = Color.FromArgb(10, 15, 30);
 
             webView = new WebView2

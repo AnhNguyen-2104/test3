@@ -54,6 +54,11 @@ namespace DACDT_2026
                     currentDataNoAddr= $"U0\\G{mb + 35}",
                     lastDataNo       = connected ? axLastDataNo[i].ToString(CultureInfo.InvariantCulture) : dash,
                     lastDataNoAddr   = $"U0\\G{mb + 37}",
+                    // Md.30 signals
+                    limitMinus       = connected && (axSignals[i] & 0x01) != 0,
+                    limitPlus        = connected && (axSignals[i] & 0x02) != 0,
+                    homeDog          = connected && (axSignals[i] & 0x40) != 0,
+                    isComplete       = connected && rawStatus == 0, // Standby = hoàn thành
                     errorReset       = connected ? axErrorReset[i].ToString(CultureInfo.InvariantCulture) : dash,
                     errorResetAddr   = $"U0\\G{cb + OffErrorReset}",
                     jogSpeed         = connected ? FormatSpeedMm(axJogSpeed[i]) : dash,
@@ -122,7 +127,7 @@ namespace DACDT_2026
 
                 // Giới hạn primitives gửi lên UI: 2000 primitives, mỗi arc tối đa 12 điểm
                 const int MaxPrimitives = 2000;
-                const int MaxArcPoints  = 96; // cung tròn mượt trên UI
+                const int MaxArcPoints  = 36; // Balance between smooth arcs and JSON size
                 var primList = snapDoc == null
                     ? new System.Collections.Generic.List<object>()
                     : snapDoc.Primitives.Take(MaxPrimitives).Select(p =>

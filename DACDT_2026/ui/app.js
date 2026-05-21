@@ -584,7 +584,18 @@ function renderControl() {
         const cls = f.big ? 'axis-field-value' : 'axis-field-value sm';
         return `<div class="axis-field"><div class="axis-field-label">${esc(f.label)} <span class="axis-addr">${esc(addr)}</span></div><div class="${cls}">${esc(val)}</div></div>`;
       }).join('');
-      return `<div class="axis-card"><div class="axis-header ${accents[i] || ''}">AXIS ${n}</div><div class="axis-body">${rows}</div></div>`;
+      // Signal LEDs
+      const lm = a.limitMinus ? '#ef4444' : '#333';
+      const lp = a.limitPlus ? '#ef4444' : '#333';
+      const hm = a.homeDog ? '#22c55e' : '#333';
+      const cp = a.isComplete ? '#3b82f6' : '#333';
+      const leds = `<div style="display:flex;gap:8px;margin-top:6px;padding-top:6px;border-top:1px solid rgba(255,255,255,0.05);">
+        <span style="font-size:9px;color:var(--muted);display:flex;align-items:center;gap:3px;"><span style="width:8px;height:8px;border-radius:50%;background:${lm};display:inline-block;"></span>LIM-</span>
+        <span style="font-size:9px;color:var(--muted);display:flex;align-items:center;gap:3px;"><span style="width:8px;height:8px;border-radius:50%;background:${lp};display:inline-block;"></span>LIM+</span>
+        <span style="font-size:9px;color:var(--muted);display:flex;align-items:center;gap:3px;"><span style="width:8px;height:8px;border-radius:50%;background:${hm};display:inline-block;"></span>HOME</span>
+        <span style="font-size:9px;color:var(--muted);display:flex;align-items:center;gap:3px;"><span style="width:8px;height:8px;border-radius:50%;background:${cp};display:inline-block;"></span>DONE</span>
+      </div>`;
+      return `<div class="axis-card"><div class="axis-header ${accents[i] || ''}">AXIS ${n}</div><div class="axis-body">${rows}${leds}</div></div>`;
     }).join('');
 
     // Program Monitor panel (thay Axis 4)
@@ -631,8 +642,19 @@ function renderControl() {
             const cls = f.big ? 'axis-field-value' : 'axis-field-value sm';
             return `<div class="axis-field"><div class="axis-field-label">${esc(f.label)} <span class="axis-addr">${esc(addr)}</span></div><div class="${cls}">${esc(val)}</div></div>`;
           }).join('');
+          // Signal LEDs
+          const lm = a.limitMinus ? '#ef4444' : '#333';
+          const lp = a.limitPlus ? '#ef4444' : '#333';
+          const hm = a.homeDog ? '#22c55e' : '#333';
+          const cp = a.isComplete ? '#3b82f6' : '#333';
+          const leds = `<div style="display:flex;gap:8px;margin-top:6px;padding-top:6px;border-top:1px solid rgba(255,255,255,0.05);">
+            <span style="font-size:9px;color:var(--muted);display:flex;align-items:center;gap:3px;"><span style="width:8px;height:8px;border-radius:50%;background:${lm};display:inline-block;"></span>LIM-</span>
+            <span style="font-size:9px;color:var(--muted);display:flex;align-items:center;gap:3px;"><span style="width:8px;height:8px;border-radius:50%;background:${lp};display:inline-block;"></span>LIM+</span>
+            <span style="font-size:9px;color:var(--muted);display:flex;align-items:center;gap:3px;"><span style="width:8px;height:8px;border-radius:50%;background:${hm};display:inline-block;"></span>HOME</span>
+            <span style="font-size:9px;color:var(--muted);display:flex;align-items:center;gap:3px;"><span style="width:8px;height:8px;border-radius:50%;background:${cp};display:inline-block;"></span>DONE</span>
+          </div>`;
           const body = axisCards[i].querySelector('.axis-body');
-          if (body) body.innerHTML = rowsHtml;
+          if (body) body.innerHTML = rowsHtml + leds;
         }
       }
     }

@@ -23,42 +23,46 @@ namespace DACDT_2026
         // ── Open DXF ────────────────────────────────────────────────────────────
 
         /// <summary>
-        /// Hiển thị OpenFileDialog đồng bộ trên UI thread.
-        /// Tạm đổi FormBorderStyle để dialog không crash với FormBorderStyle.None.
+        /// Mở file bằng cách dùng OpenFileDialog trên thread riêng (tránh crash WebView2).
         /// </summary>
         private string ShowOpenFileDialog()
         {
             plcPollTimer.Stop();
             isPreviewingGcode = true;
-            webView.Visible = false; // Tạm ẩn WebView2 để ngăn message gửi khi dialog mở
 
+            string result = null;
             try
             {
-                using (var dialog = new OpenFileDialog())
+                // Chạy dialog trên STA thread riêng — hoàn toàn tách biệt khỏi WebView2
+                var dialogThread = new System.Threading.Thread(() =>
                 {
-                    dialog.Filter           = "CAD / G-code files (*.dxf;*.gcode;*.g;*.gc;*.nc;*.ngc;*.cnc;*.tap)|*.dxf;*.gcode;*.g;*.gc;*.nc;*.ngc;*.cnc;*.tap|DXF files (*.dxf)|*.dxf|G-code files (*.gcode;*.g;*.gc;*.nc;*.ngc;*.cnc;*.tap)|*.gcode;*.g;*.gc;*.nc;*.ngc;*.cnc;*.tap|All files (*.*)|*.*";
-                    dialog.Title            = "Open DXF or G-code file";
-                    dialog.CheckFileExists  = true;
-                    dialog.Multiselect      = false;
-                    dialog.RestoreDirectory = true;
-                    dialog.FileName         = string.Empty;
+                    using (var dialog = new OpenFileDialog())
+                    {
+                        dialog.Filter = "CAD / G-code files (*.dxf;*.gcode;*.g;*.gc;*.nc;*.ngc;*.cnc;*.tap)|*.dxf;*.gcode;*.g;*.gc;*.nc;*.ngc;*.cnc;*.tap|All files (*.*)|*.*";
+                        dialog.Title = "Open DXF or G-code file";
+                        dialog.CheckFileExists = true;
+                        dialog.Multiselect = false;
+                        dialog.RestoreDirectory = true;
 
-                    string initialDir = activeCadDocument?.DirectoryPath;
-                    if (!string.IsNullOrWhiteSpace(initialDir) && Directory.Exists(initialDir))
-                        dialog.InitialDirectory = initialDir;
+                        string initialDir = activeCadDocument?.DirectoryPath;
+                        if (!string.IsNullOrWhiteSpace(initialDir) && Directory.Exists(initialDir))
+                            dialog.InitialDirectory = initialDir;
 
-                    return dialog.ShowDialog(this) == DialogResult.OK
-                        ? Path.GetFullPath(dialog.FileName)
-                        : null;
-                }
+                        if (dialog.ShowDialog() == DialogResult.OK)
+                            result = Path.GetFullPath(dialog.FileName);
+                    }
+                });
+                dialogThread.SetApartmentState(System.Threading.ApartmentState.STA);
+                dialogThread.Start();
+                dialogThread.Join(); // Chờ user chọn file
             }
             finally
             {
-                webView.Visible = true;
                 isPreviewingGcode = false;
                 if (plcComm != null && plcComm.IsConnected && !isClosing)
                     plcPollTimer.Start();
             }
+            return result;
         }
 
         private async Task HandleOpenDxfAsync()
@@ -334,23 +338,29 @@ namespace DACDT_2026
         private string ShowSaveGcodeDialog()
         {
             plcPollTimer.Stop();
-            webView.Visible = false;
+            isPreviewingGcode = true;
 
             string result = null;
             try
             {
-                using (var sfd = new SaveFileDialog())
+                var dialogThread = new System.Threading.Thread(() =>
                 {
-                    sfd.Filter = "G-code files (*.nc;*.gcode;*.txt)|*.nc;*.gcode;*.txt|All files (*.*)|*.*";
-                    sfd.Title = "Save G-code";
-                    sfd.FileName = "GCode_" + DateTime.Now.ToString("yyyyMMdd_HHmmss") + ".nc";
-                    if (sfd.ShowDialog(this) == DialogResult.OK)
-                        result = sfd.FileName;
-                }
+                    using (var sfd = new SaveFileDialog())
+                    {
+                        sfd.Filter = "G-code files (*.nc;*.gcode;*.txt)|*.nc;*.gcode;*.txt|All files (*.*)|*.*";
+                        sfd.Title = "Save G-code";
+                        sfd.FileName = "GCode_" + DateTime.Now.ToString("yyyyMMdd_HHmmss") + ".nc";
+                        if (sfd.ShowDialog() == DialogResult.OK)
+                            result = sfd.FileName;
+                    }
+                });
+                dialogThread.SetApartmentState(System.Threading.ApartmentState.STA);
+                dialogThread.Start();
+                dialogThread.Join();
             }
             finally
             {
-                webView.Visible = true;
+                isPreviewingGcode = false;
                 if (plcComm != null && plcComm.IsConnected && !isClosing)
                     plcPollTimer.Start();
             }
