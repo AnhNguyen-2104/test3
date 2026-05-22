@@ -286,17 +286,24 @@
           </div>
 
           <div class="panel panel-process">
-            <div style="padding:8px 12px 4px;font-size:13px;font-weight:700;color:var(--text-main);">Process Table</div>
+            <div style="padding:8px 12px 4px; display:flex; align-items:center; justify-content:space-between;">
+              <span style="font-size:13px;font-weight:700;color:var(--text-main);">Process Table</span>
+              <button id="export-csv-btn" class="primary-button compact" style="background:var(--panel-3); border:1px solid var(--border); color:var(--text); font-size:11px; padding:0 10px; height:28px;" title="Xuất Process Table ra file Excel 2 sheet (Axis1_X và Axis2_Y)">⬇ Export Excel</button>
+            </div>
             <div class="table-frame short">
-              <table class="data-table compact">
+              <table class="data-table compact process-spaced-table">
                 <thead>
                   <tr>
+                    <th>#</th>
                     <th>Motion type</th>
-                    <th>M code value</th>
+                    <th>M code</th>
                     <th>Dwell</th>
                     <th>Speed</th>
-                    <th>End coord (X;Y)</th>
-                    <th>Center coord (X;Y)</th>
+                    <th>End X</th>
+                    <th>End Y</th>
+                    <th>End Z</th>
+                    <th>Center X</th>
+                    <th>Center Y</th>
                   </tr>
                 </thead>
                 <tbody id="process-table-body"></tbody>
@@ -530,6 +537,7 @@
     </div>
   </div>
 
+  <script src="xlsx.full.min.js"></script>
   <script src="app.js"></script>
 </body>
 

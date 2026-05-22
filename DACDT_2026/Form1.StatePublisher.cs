@@ -203,6 +203,7 @@ namespace DACDT_2026
                         speed            = row.Speed            ?? string.Empty,
                         endCoordinate    = row.EndCoordinate    ?? string.Empty,
                         centerCoordinate = row.CenterCoordinate ?? string.Empty,
+                        endZ             = row.EndZ,
                         endCoordinateDisplay    = endWithOffset,
                         centerCoordinateDisplay = centerWithOffset
                     };

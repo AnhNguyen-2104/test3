@@ -383,6 +383,9 @@ function bindEvents() {
       post("clearBuffer");
     }
   });
+
+  const exportCsvBtn = document.getElementById("export-csv-btn");
+  if (exportCsvBtn) exportCsvBtn.addEventListener("click", () => exportProcessTableCSV());
   
   if (dom.applyOffsetBtn) {
     dom.applyOffsetBtn.addEventListener("click", () => {
@@ -914,8 +917,182 @@ function renderProcessTable() {
   dom.processBody.innerHTML = visible.map((r, i) => {
     const endDisp   = r.endCoordinateDisplay   || r.endCoordinate   || "";
     const centDisp  = r.centerCoordinateDisplay || r.centerCoordinate || "";
-    return `<tr data-process-index="${i}"><td>${esc(r.motionType || "")}</td><td><input type="text" class="text-input compact" style="margin:0;width:100%;min-width:80px" data-process-index="${i}" data-process-field="mcode" value="${esc(r.mCodeValue || "")}"></td><td><input type="text" class="text-input compact" style="margin:0;width:100%;min-width:60px" data-process-index="${i}" data-process-field="dwell" value="${esc(r.dwell || "")}"></td><td><input type="text" class="text-input compact" style="margin:0;width:100%;min-width:60px" data-process-index="${i}" data-process-field="speed" value="${esc(r.speed || "")}"></td><td>${esc(endDisp)}</td><td>${esc(centDisp)}</td></tr>`;
-  }).join("") + (overflow > 0 ? `<tr><td colspan="6" style="text-align:center;color:var(--muted);font-size:11px;padding:6px;">... ${overflow} more rows (total ${rows.length})</td></tr>` : "");
+    // Tách X;Y từ endCoordinate và centerCoordinate
+    const endParts  = endDisp.split(';');
+    const centParts = centDisp.split(';');
+    const endX  = endParts[0]  || "";
+    const endY  = endParts[1]  || "";
+    const endZ  = (r.endZ != null && r.endZ !== 0) ? r.endZ : "";
+    const centX = centParts[0] || "";
+    const centY = centParts[1] || "";
+    return `<tr data-process-index="${i}">
+      <td style="color:var(--muted);font-size:10px;">${i + 1}</td>
+      <td>${esc(r.motionType || "")}</td>
+      <td><input type="text" class="text-input compact" style="margin:0;width:100%;min-width:60px" data-process-index="${i}" data-process-field="mcode" value="${esc(r.mCodeValue || "")}"></td>
+      <td><input type="text" class="text-input compact" style="margin:0;width:100%;min-width:50px" data-process-index="${i}" data-process-field="dwell" value="${esc(r.dwell || "")}"></td>
+      <td><input type="text" class="text-input compact" style="margin:0;width:100%;min-width:50px" data-process-index="${i}" data-process-field="speed" value="${esc(r.speed || "")}"></td>
+      <td style="font-family:monospace;font-size:11px;">${esc(endX)}</td>
+      <td style="font-family:monospace;font-size:11px;">${esc(endY)}</td>
+      <td style="font-family:monospace;font-size:11px;color:var(--cyan);">${esc(String(endZ))}</td>
+      <td style="font-family:monospace;font-size:11px;color:var(--muted);">${esc(centX)}</td>
+      <td style="font-family:monospace;font-size:11px;color:var(--muted);">${esc(centY)}</td>
+    </tr>`;
+  }).join("") + (overflow > 0 ? `<tr><td colspan="10" style="text-align:center;color:var(--muted);font-size:11px;padding:6px;">... ${overflow} more rows (total ${rows.length})</td></tr>` : "");
+}
+
+// ── Export Process Table to Excel (.xlsx) ────────────────────────────────────
+function exportProcessTableCSV() {
+  const rows = state.dxf.processRows || [];
+  if (rows.length === 0) {
+    showToast("info", "Export Excel", "Không có dữ liệu để xuất.");
+    return;
+  }
+  if (typeof XLSX === 'undefined') {
+    showToast("error", "Export Excel", "Thư viện XLSX chưa tải. Vui lòng reload app.");
+    return;
+  }
+
+  const COORD_SCALE = 10000; // mm → 0.1µm (QD75 unit)
+  const fileName = state.dxf.fileName || "process";
+  const baseName = fileName.replace(/\.[^.]+$/, "");
+
+  // ── Helpers ──────────────────────────────────────────────────────────────
+  function getDa1(mt) {
+    const s = (mt || "").toLowerCase();
+    if (s.includes("(end)") || s.includes(" end)")) return "00: Positioning complete";
+    if (s.includes("continuous positioning"))        return "01: Continuous positioning";
+    return "11: Continuous path";
+  }
+  function getDa2(mt) {
+    const s = (mt || "").toLowerCase();
+    if (s.includes("rapid3") || s.includes("linear3")) return "ABS Linear 3";
+    if (s.includes("arc cw"))                          return "ABS Circular Right";
+    if (s.includes("arc ccw"))                         return "ABS Circular Left";
+    if (s.includes("circle"))                          return "ABS Circular Right";
+    return "ABS Linear 2";
+  }
+  function getDa5(mt) {
+    const s = (mt || "").toLowerCase();
+    if (s.includes("rapid3") || s.includes("linear3")) return "";
+    if (s.includes("(end)") || s.includes(" end)"))    return "";
+    if (s.includes("continuous positioning"))           return "";
+    return "Axis 2";
+  }
+  function sc(val) { // scale mm → 0.1µm
+    if (val === "" || val == null) return "";
+    const n = parseFloat(val);
+    return isNaN(n) ? "" : Math.round(n * COORD_SCALE);
+  }
+  function num(val) {
+    if (val === "" || val == null) return 0;
+    const n = Number(val);
+    return isNaN(n) ? 0 : n;
+  }
+
+  // ── Header (giống bảng QD75 GX Works2) ──────────────────────────────────
+  const HEADER = [
+    "No.",
+    "Operation pattern",
+    "Control system",
+    "Axis to be interpolated",
+    "Acceleration time No.",
+    "Deceleration time No.",
+    "Positioning address (0.1µm)",
+    "Arc address (0.1µm)",
+    "Command speed (mm/min)",
+    "Dwell time (ms)",
+    "M code"
+  ];
+
+  // ── Build sheet data ─────────────────────────────────────────────────────
+  // axisIdx: 0 = X (Axis 1 Master), 1 = Y (Axis 2 Slave)
+  function buildSheet(axisIdx) {
+    const data = [HEADER];
+    rows.forEach((r, i) => {
+      const endRaw  = r.endCoordinateDisplay   || r.endCoordinate   || "";
+      const centRaw = r.centerCoordinateDisplay || r.centerCoordinate || "";
+      const endVal  = (endRaw.split(';')[axisIdx]  || "").trim();
+      const centVal = (centRaw.split(';')[axisIdx] || "").trim();
+
+      if (axisIdx === 0) {
+        // Axis 1 (X) — Master: đầy đủ Da.1~Da.5, speed, dwell, M code
+        // Nếu có Z (Linear3): Positioning address = X, Arc address = Z
+        // Nếu không có Z:     Positioning address = X, Arc address = Center X
+        const hasZ = r.endZ !== undefined && r.endZ !== null && r.endZ !== 0;
+        const posAddr = sc(endVal);
+        const arcAddr = hasZ ? Math.round(r.endZ * COORD_SCALE) : sc(centVal);
+
+        data.push([
+          i + 1,
+          getDa1(r.motionType),
+          getDa2(r.motionType),
+          getDa5(r.motionType),
+          0,           // Da.3 Acceleration time No.
+          0,           // Da.4 Deceleration time No.
+          posAddr,     // Positioning address X (0.1µm)
+          arcAddr,     // Arc address / Z (0.1µm)
+          num(r.speed),
+          num(r.dwell),
+          num(r.mCodeValue)
+        ]);
+      } else {
+        // Axis 2 (Y) — Slave: chỉ cần Positioning address Y và Arc address Y
+        data.push([
+          i + 1,
+          "",          // Da.1 — slave không cần
+          "",          // Da.2
+          "",          // Da.5
+          "",          // Da.3
+          "",          // Da.4
+          sc(endVal),  // Positioning address Y (0.1µm)
+          sc(centVal), // Arc address Y (0.1µm)
+          "",          // speed
+          "",          // dwell
+          ""           // M code
+        ]);
+      }
+      data.push([]); // dòng trống giữa các điểm
+    });
+    return data;
+  }
+
+  // ── Column widths ────────────────────────────────────────────────────────
+  const COLS = [
+    { wch: 6  }, // No.
+    { wch: 26 }, // Operation pattern
+    { wch: 20 }, // Control system
+    { wch: 26 }, // Axis to be interpolated
+    { wch: 22 }, // Acceleration time No.
+    { wch: 22 }, // Deceleration time No.
+    { wch: 26 }, // Positioning address
+    { wch: 22 }, // Arc address
+    { wch: 22 }, // Command speed
+    { wch: 14 }, // Dwell time
+    { wch: 10 }  // M code
+  ];
+
+  // ── Tạo workbook ─────────────────────────────────────────────────────────
+  const wb = XLSX.utils.book_new();
+
+  // Sheet 1: Axis 1 (X)
+  const wsX = XLSX.utils.aoa_to_sheet(buildSheet(0));
+  wsX['!cols'] = COLS;
+  wsX['!freeze'] = { xSplit: 0, ySplit: 1 }; // freeze header row
+  XLSX.utils.book_append_sheet(wb, wsX, "Axis1_X");
+
+  // Sheet 2: Axis 2 (Y)
+  const wsY = XLSX.utils.aoa_to_sheet(buildSheet(1));
+  wsY['!cols'] = COLS;
+  wsY['!freeze'] = { xSplit: 0, ySplit: 1 };
+  XLSX.utils.book_append_sheet(wb, wsY, "Axis2_Y");
+
+  // ── Download ─────────────────────────────────────────────────────────────
+  const ts = new Date().toISOString().slice(0, 19).replace(/[T:]/g, "-");
+  const outName = `${baseName}_QD75_${ts}.xlsx`;
+  XLSX.writeFile(wb, outName);
+
+  showToast("success", "Export Excel",
+    `Đã xuất ${rows.length} điểm → ${outName}  (Sheet: Axis1_X + Axis2_Y)`);
 }
 
 function renderCadPreview() {
