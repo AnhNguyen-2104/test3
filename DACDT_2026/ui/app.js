@@ -952,16 +952,17 @@ function exportProcessTableCSV() {
     return;
   }
 
-  const COORD_SCALE = 10000; // mm → 0.1µm
+  const COORD_SCALE = 1000; // mm → µm (QD75 unit ×1000)
   const fileName = state.dxf.fileName || "process";
   const baseName = fileName.replace(/\.[^.]+$/, "");
 
-  // ── Da.1: Operation pattern ──────────────────────────────────────────────
-  function getDa1(mt) {
+  // ── Da.1: Operation pattern — chỉ xuất số ──────────────────────────────
+  // 0 = END, 1 = CONT (Continuous Positioning), 3 = CONT/LOCATION (Continuous Path)
+  function getDa1(mt, mcode) {
     const s = (mt || "").toLowerCase();
-    if (s.includes("(end)") || s.includes(" end)")) return "0:END";
-    if (s.includes("continuous positioning"))        return "1:CONT";
-    return "3:CONT";
+    if (s.includes("(end)") || s.includes(" end)")) return 0;
+    if (s.includes("continuous positioning"))        return 1;
+    return 3; // Continuous Path (cả CONT và LOCATION đều = 3)
   }
 
   // ── Da.2: Control system ────────────────────────────────────────────────
@@ -1024,7 +1025,7 @@ function exportProcessTableCSV() {
         const arcAddr = hasZ ? Math.round(r.endZ * COORD_SCALE) : sc(centVal);
 
         data.push([
-          getDa1(r.motionType),
+          getDa1(r.motionType, r.mCodeValue),  // Operation pattern (có xét M code)
           getDa2(r.motionType),
           getDa5(r.motionType),
           0,                              // Acceleration time No.
