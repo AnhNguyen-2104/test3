@@ -151,6 +151,12 @@ function cacheDom() {
   dom.sendRowCount   = document.getElementById("send-row-count");
   dom.viewSettings   = document.getElementById("view-settings");
   dom.viewHelp       = document.getElementById("view-help");
+  dom.profileNameInput = document.getElementById("profile-name-input");
+  dom.profileSelect    = document.getElementById("profile-select");
+  dom.saveProfileBtn   = document.getElementById("save-profile-btn");
+  dom.loadProfileBtn   = document.getElementById("load-profile-btn");
+  dom.deleteProfileBtn = document.getElementById("delete-profile-btn");
+  dom.profileStatus    = document.getElementById("profile-status");
 }
 
 function bindEvents() {
@@ -396,6 +402,10 @@ function bindEvents() {
       if (spdInput) {
         post("setProcessValue", { key: "speed", value: spdInput.value });
       }
+      const speedM3Input = document.getElementById("speed-m3-input");
+      if (speedM3Input) {
+        post("setProcessValue", { key: "globalSpeedM3", value: speedM3Input.value });
+      }
       const dwellM3 = document.getElementById("dwell-m3-input");
       if (dwellM3) {
         post("setProcessValue", { key: "dwellM3", value: dwellM3.value });
@@ -469,6 +479,53 @@ function bindEvents() {
       post("setWcsOffset", { wcs, x: ox, y: oy });
       const st = document.getElementById("wcs-status");
       if (st) { st.textContent = "✓ " + wcs + " X=" + ox + " Y=" + oy; setTimeout(() => { st.textContent = ""; }, 3000); }
+    });
+  }
+
+  // Profile manager events
+  if (dom.profileSelect) {
+    dom.profileSelect.addEventListener("change", () => {
+      if (dom.profileSelect.value && dom.profileNameInput) {
+        dom.profileNameInput.value = dom.profileSelect.value;
+      }
+    });
+  }
+
+  if (dom.saveProfileBtn) {
+    dom.saveProfileBtn.addEventListener("click", () => {
+      const name = dom.profileNameInput ? dom.profileNameInput.value.trim() : "";
+      if (!name) {
+        showToast("error", "Lỗi", "Vui lòng nhập tên cấu hình!");
+        return;
+      }
+      post("saveSettingsProfile", { name });
+    });
+  }
+
+  if (dom.loadProfileBtn) {
+    dom.loadProfileBtn.addEventListener("click", () => {
+      const name = (dom.profileSelect ? dom.profileSelect.value : "") || (dom.profileNameInput ? dom.profileNameInput.value.trim() : "");
+      if (!name) {
+        showToast("error", "Lỗi", "Vui lòng chọn hoặc nhập tên cấu hình cần tải!");
+        return;
+      }
+      post("loadSettingsProfile", { name });
+    });
+  }
+
+  if (dom.deleteProfileBtn) {
+    dom.deleteProfileBtn.addEventListener("click", () => {
+      const name = dom.profileSelect ? dom.profileSelect.value : "";
+      if (!name) {
+        showToast("error", "Lỗi", "Vui lòng chọn cấu hình cần xóa trong danh sách!");
+        return;
+      }
+      if (confirm(`Bạn có chắc chắn muốn xóa cấu hình '${name}'?`)) {
+        post("deleteSettingsProfile", { name });
+        if (dom.profileNameInput && dom.profileNameInput.value === name) {
+          dom.profileNameInput.value = "";
+        }
+      }
     });
   }
 }
@@ -780,6 +837,8 @@ function renderDxf() {
   syncInputValue(dom.cadFile, state.dxf.fileName || "");
   const speedInput = document.getElementById("global-speed-input");
   if (speedInput && state.dxf.globalSpeed) syncInputValue(speedInput, state.dxf.globalSpeed);
+  const speedM3Input = document.getElementById("speed-m3-input");
+  if (speedM3Input && state.dxf.globalSpeedM3) syncInputValue(speedM3Input, state.dxf.globalSpeedM3);
 
   // Sync all settings inputs from backend state
   const g0Input = document.getElementById("g0-speed-input");
@@ -807,6 +866,21 @@ function renderDxf() {
     const wcsOy = document.getElementById("wcs-offset-y");
     if (wcsOx) syncInputValue(wcsOx, String(activeData.x || 0));
     if (wcsOy) syncInputValue(wcsOy, String(activeData.y || 0));
+  }
+
+  // Sync Configuration Profiles select options
+  if (dom.profileSelect) {
+    const activeProfiles = state.dxf.profiles || [];
+    const currentSelected = dom.profileSelect.value;
+    let html = '<option value="">-- Chọn cấu hình đã lưu --</option>';
+    activeProfiles.forEach(p => {
+      html += `<option value="${esc(p)}"${p === currentSelected ? ' selected' : ''}>${esc(p)}</option>`;
+    });
+    
+    const currentHtml = dom.profileSelect.innerHTML;
+    if (currentHtml.replace(/\s/g, '') !== html.replace(/\s/g, '')) {
+      dom.profileSelect.innerHTML = html;
+    }
   }
 
   const importBtn = document.getElementById("import-cad-to-process-button");

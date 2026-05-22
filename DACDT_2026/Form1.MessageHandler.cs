@@ -218,6 +218,127 @@ namespace DACDT_2026
                         }
                         break;
 
+                    case "saveSettingsProfile":
+                        {
+                            string rawName = GetString(payload, "name");
+                            if (string.IsNullOrWhiteSpace(rawName))
+                            {
+                                await NotifyAsync("error", "Profiles", "Tên cấu hình không được để trống.");
+                                break;
+                            }
+                            string cleanName = "";
+                            foreach (char c in rawName)
+                            {
+                                if (char.IsLetterOrDigit(c) || c == '_' || c == '-')
+                                    cleanName += c;
+                            }
+                            if (string.IsNullOrWhiteSpace(cleanName))
+                            {
+                                await NotifyAsync("error", "Profiles", "Tên cấu hình chỉ được chứa chữ, số, gạch dưới (_) hoặc gạch ngang (-).");
+                                break;
+                            }
+                            try
+                            {
+                                if (!System.IO.Directory.Exists(ProfilesDirPath))
+                                {
+                                    System.IO.Directory.CreateDirectory(ProfilesDirPath);
+                                }
+                                string profilePath = System.IO.Path.Combine(ProfilesDirPath, cleanName + ".txt");
+                                SaveSettingsToFile(profilePath);
+                                await NotifyAsync("success", "Profiles", $"Đã lưu cấu hình '{cleanName}' thành công.");
+                                await PushDxfStateAsync();
+                            }
+                            catch (System.Exception ex)
+                            {
+                                await NotifyAsync("error", "Profiles", $"Lỗi khi lưu cấu hình: {ex.Message}");
+                            }
+                        }
+                        break;
+
+                    case "loadSettingsProfile":
+                        {
+                            string rawName = GetString(payload, "name");
+                            if (string.IsNullOrWhiteSpace(rawName))
+                            {
+                                await NotifyAsync("error", "Profiles", "Tên cấu hình không hợp lệ.");
+                                break;
+                            }
+                            string cleanName = "";
+                            foreach (char c in rawName)
+                            {
+                                if (char.IsLetterOrDigit(c) || c == '_' || c == '-')
+                                    cleanName += c;
+                            }
+                            string profilePath = System.IO.Path.Combine(ProfilesDirPath, cleanName + ".txt");
+                            if (!System.IO.File.Exists(profilePath))
+                            {
+                                await NotifyAsync("error", "Profiles", $"Không tìm thấy cấu hình '{cleanName}'.");
+                                break;
+                            }
+                            try
+                            {
+                                LoadSettingsFromFile(profilePath);
+                                SaveSettingsToFile();
+
+                                if (activeCadDocument != null)
+                                {
+                                    await HandleImportCadToProcessAsync();
+                                }
+                                else if (string.Equals(activeDocumentKind, "GCODE", System.StringComparison.OrdinalIgnoreCase))
+                                {
+                                    foreach (var row in processRows)
+                                    {
+                                        if (row.MotionType.StartsWith("Rapid", System.StringComparison.OrdinalIgnoreCase))
+                                        {
+                                            row.Speed = rapidSpeed;
+                                        }
+                                    }
+                                }
+
+                                await HandleScanLimitsAsync();
+                                await NotifyAsync("success", "Profiles", $"Đã tải cấu hình '{cleanName}' thành công.");
+                                await PushDxfStateAsync();
+                            }
+                            catch (System.Exception ex)
+                            {
+                                await NotifyAsync("error", "Profiles", $"Lỗi khi tải cấu hình: {ex.Message}");
+                            }
+                        }
+                        break;
+
+                    case "deleteSettingsProfile":
+                        {
+                            string rawName = GetString(payload, "name");
+                            if (string.IsNullOrWhiteSpace(rawName))
+                            {
+                                await NotifyAsync("error", "Profiles", "Tên cấu hình không hợp lệ.");
+                                break;
+                            }
+                            string cleanName = "";
+                            foreach (char c in rawName)
+                            {
+                                if (char.IsLetterOrDigit(c) || c == '_' || c == '-')
+                                    cleanName += c;
+                            }
+                            string profilePath = System.IO.Path.Combine(ProfilesDirPath, cleanName + ".txt");
+                            if (!System.IO.File.Exists(profilePath))
+                            {
+                                await NotifyAsync("error", "Profiles", $"Không tìm thấy cấu hình '{cleanName}' để xóa.");
+                                break;
+                            }
+                            try
+                            {
+                                System.IO.File.Delete(profilePath);
+                                await NotifyAsync("success", "Profiles", $"Đã xóa cấu hình '{cleanName}' thành công.");
+                                await PushDxfStateAsync();
+                            }
+                            catch (System.Exception ex)
+                            {
+                                await NotifyAsync("error", "Profiles", $"Lỗi khi xóa cấu hình: {ex.Message}");
+                            }
+                        }
+                        break;
+
                     // ── Log ─────────────────────────────────────────────────────
                     case "clearLogs":
                         await HandleClearLogsAsync();

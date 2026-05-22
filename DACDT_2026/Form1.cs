@@ -92,6 +92,7 @@ namespace DACDT_2026
         private string globalZSafe  = "";
         private string globalZStart = "";
         private string globalSpeed = "1000";
+        private string globalSpeedM3 = "10000"; // Tốc độ M03 Rapid cho DXF
         private string rapidSpeed  = "10000"; // Tốc độ G00 — cài đặt từ Settings tab
         private double offsetX = 0.0;
         private double offsetY = 0.0;
@@ -158,11 +159,15 @@ namespace DACDT_2026
         private static string SettingsFilePath =>
             Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "app_settings.txt");
 
-        private void LoadSettingsFromFile()
+        private static string ProfilesDirPath =>
+            Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "settings_profiles");
+
+        private void LoadSettingsFromFile(string path = null)
         {
             try
             {
-                string path = SettingsFilePath;
+                if (string.IsNullOrEmpty(path))
+                    path = SettingsFilePath;
                 if (!File.Exists(path)) return;
 
                 foreach (string line in File.ReadAllLines(path))
@@ -177,6 +182,7 @@ namespace DACDT_2026
                     {
                         case "rapidSpeed": rapidSpeed = val; break;
                         case "globalSpeed": globalSpeed = val; break;
+                        case "globalSpeedM3": globalSpeedM3 = val; break;
                         case "workspaceWidth": double.TryParse(val, NumberStyles.Any, CultureInfo.InvariantCulture, out workspaceWidth); break;
                         case "workspaceHeight": double.TryParse(val, NumberStyles.Any, CultureInfo.InvariantCulture, out workspaceHeight); break;
                         case "offsetX": double.TryParse(val, NumberStyles.Any, CultureInfo.InvariantCulture, out offsetX); break;
@@ -206,10 +212,13 @@ namespace DACDT_2026
             catch { /* ignore load errors */ }
         }
 
-        private void SaveSettingsToFile()
+        private void SaveSettingsToFile(string path = null)
         {
             try
             {
+                if (string.IsNullOrEmpty(path))
+                    path = SettingsFilePath;
+
                 var lines = new List<string>
                 {
                     "# DACDT_2026 Settings",
@@ -227,6 +236,7 @@ namespace DACDT_2026
                     $"globalZSafe={globalZSafe}",
                     $"globalDwellM3={globalDwellM3}",
                     $"globalDwellM4={globalDwellM4}",
+                    $"globalSpeedM3={globalSpeedM3}",
                     $"memberPassword={memberPassword}",
                     $"activeWcs={activeWcs}",
                 };
@@ -236,9 +246,26 @@ namespace DACDT_2026
                     lines.Add($"wcs{gName}X={wcsOffsetX[i].ToString("0.###", CultureInfo.InvariantCulture)}");
                     lines.Add($"wcs{gName}Y={wcsOffsetY[i].ToString("0.###", CultureInfo.InvariantCulture)}");
                 }
-                File.WriteAllLines(SettingsFilePath, lines);
+                File.WriteAllLines(path, lines);
             }
             catch { /* ignore save errors */ }
+        }
+
+        private List<string> GetProfilesList()
+        {
+            var profiles = new List<string>();
+            try
+            {
+                if (Directory.Exists(ProfilesDirPath))
+                {
+                    foreach (var file in Directory.GetFiles(ProfilesDirPath, "*.txt"))
+                    {
+                        profiles.Add(Path.GetFileNameWithoutExtension(file));
+                    }
+                }
+            }
+            catch { }
+            return profiles;
         }
 
         // ── WebView2 initialization ───────────────────────────────────────────────

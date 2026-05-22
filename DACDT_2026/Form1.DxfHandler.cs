@@ -407,7 +407,19 @@ namespace DACDT_2026
             {
                 globalSpeed = value;
                 foreach (var row in processRows)
-                    row.Speed = value;
+                {
+                    if (row.MCodeValue != "3")
+                        row.Speed = value;
+                }
+            }
+            else if (string.Equals(key, "globalSpeedM3", StringComparison.OrdinalIgnoreCase) || string.Equals(key, "speedM3", StringComparison.OrdinalIgnoreCase))
+            {
+                globalSpeedM3 = value;
+                foreach (var row in processRows)
+                {
+                    if (row.MCodeValue == "3")
+                        row.Speed = value;
+                }
             }
             else if (string.Equals(key, "dwell", StringComparison.OrdinalIgnoreCase))
             {
@@ -576,6 +588,7 @@ namespace DACDT_2026
 
             bool isGcodeDoc  = string.Equals(activeDocumentKind, "GCODE", StringComparison.OrdinalIgnoreCase);
             string snapSpeed = globalSpeed;
+            string snapSpeedM3 = globalSpeedM3;
 
             // Build rows trên background thread
             List<ProcessRow> rows = null;
@@ -596,12 +609,17 @@ namespace DACDT_2026
 
                 if (string.IsNullOrEmpty(row.Speed))
                 {
-                    // DXF: dùng globalSpeed làm fallback
+                    // DXF: dùng globalSpeed/globalSpeedM3 làm fallback
                     // GCODE Rapid3: đã được gán rapidSpeed trong BuildConnectedPathsFromCad
                     // GCODE G1/G2/G3 không có F: không gán fallback — speed = 0 là hợp lệ
                     //   (PLC sẽ dùng speed từ lệnh trước theo modal của module)
                     if (!isGcodeDoc)
-                        row.Speed = snapSpeed;
+                    {
+                        if (row.MCodeValue == "3")
+                            row.Speed = snapSpeedM3;
+                        else
+                            row.Speed = snapSpeed;
+                    }
                 }
             }
 

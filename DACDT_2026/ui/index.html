@@ -316,120 +316,173 @@
 
       <!-- ========== SYSTEM SETTINGS ========== -->
       <section id="view-settings" class="view">
-        <div class="panel" style="max-width:680px;">
-          <div class="panel-header">
-            <div>
-              <div class="panel-title">System Settings</div>
-              <div class="panel-subtitle">DXF/G-code run parameters</div>
+        <div class="settings-grid">
+          
+          <!-- Left Column -->
+          <div class="settings-col">
+            
+            <!-- Card 1: DXF Offset & Speed -->
+            <div class="panel settings-card">
+              <div class="panel-header">
+                <div>
+                  <div class="panel-title">DXF Offset & Speed Settings</div>
+                  <div class="panel-subtitle">Parameters applied to DXF paths. Does not affect G-code.</div>
+                </div>
+              </div>
+              
+              <div class="settings-input-grid-3x2">
+                <div>
+                  <label class="field-label" for="offset-x-input">Offset X (mm)</label>
+                  <input id="offset-x-input" class="text-input" type="number" value="0" step="0.001">
+                </div>
+                <div>
+                  <label class="field-label" for="speed-m3-input" title="Speed for points with MCode = 3">Speed M03 (mm/min)</label>
+                  <input id="speed-m3-input" class="text-input" type="number" value="10000" step="1">
+                </div>
+                <div>
+                  <label class="field-label" for="dwell-m3-input" title="Wait time at dispensing start">Dwell M03 (ms)</label>
+                  <input id="dwell-m3-input" class="text-input" type="number" value="100" step="1">
+                </div>
+                <div>
+                  <label class="field-label" for="offset-y-input">Offset Y (mm)</label>
+                  <input id="offset-y-input" class="text-input" type="number" value="0" step="0.001">
+                </div>
+                <div>
+                  <label class="field-label" for="global-speed-input">Speed M04 (mm/min)</label>
+                  <input id="global-speed-input" class="text-input" type="number" value="1000" step="1">
+                </div>
+                <div>
+                  <label class="field-label" for="dwell-m4-input" title="Wait time at dispensing end">Dwell M04 (ms)</label>
+                  <input id="dwell-m4-input" class="text-input" type="number" value="100" step="1">
+                </div>
+              </div>
+              
+              <div class="settings-action-row">
+                <button id="apply-offset-btn" class="primary-button" style="background:var(--cyan);color:#fff;">Apply DXF Settings</button>
+                <span id="offset-status" class="settings-status-text"></span>
+              </div>
             </div>
+
+            <!-- Card 2: Configuration Profiles -->
+            <div class="panel settings-card">
+              <div class="panel-header">
+                <div>
+                  <div class="panel-title">Configuration Profiles</div>
+                  <div class="panel-subtitle">Save current settings as a profile or load saved ones.</div>
+                </div>
+              </div>
+              
+              <div class="settings-input-grid-2x1">
+                <div>
+                  <label class="field-label" for="profile-name-input">New Profile Name</label>
+                  <input id="profile-name-input" class="text-input" type="text" placeholder="e.g. profile_fast">
+                </div>
+                <div>
+                  <label class="field-label" for="profile-select">Select Saved Profile</label>
+                  <select id="profile-select">
+                    <option value="">-- Chọn cấu hình đã lưu --</option>
+                  </select>
+                </div>
+              </div>
+              
+              <div class="settings-action-row">
+                <button id="save-profile-btn" class="primary-button" style="background:var(--cyan);color:#fff;">Save Profile</button>
+                <button id="load-profile-btn" class="primary-button" style="background:var(--green);color:#fff;">Load Profile</button>
+                <button id="delete-profile-btn" class="primary-button" style="background:var(--red);color:#fff;">Delete Profile</button>
+                <span id="profile-status" class="settings-status-text"></span>
+              </div>
+            </div>
+
           </div>
 
-          <!-- G00 Rapid Speed -->
-          <div style="margin-top:24px;padding-top:16px;border-top:1px solid var(--border);">
-            <div style="font-size:13px;font-weight:600;color:var(--text-main);margin-bottom:4px;">G00 Rapid Speed (mm/min)</div>
-            <div style="font-size:11px;color:var(--muted);margin-bottom:10px;">
-              Speed applied to all G00 commands. Ignores F value in G-code file. Default: 10000.
+          <!-- Right Column -->
+          <div class="settings-col">
+            
+            <!-- Card 3: Machine General Config -->
+            <div class="panel settings-card">
+              <div class="panel-header">
+                <div>
+                  <div class="panel-title">Machine Config & Workspace</div>
+                  <div class="panel-subtitle">Rapid speed (G00) and drawing boundary dimensions.</div>
+                </div>
+              </div>
+              
+              <!-- Rapid Speed section -->
+              <div class="field-section" style="border-top:none; padding-top:0; margin-top:0;">
+                <div class="field-group-title">G00 Rapid Speed (mm/min)</div>
+                <div class="field-description" style="margin-bottom: 4px;">Applied to all G00 commands. Ignores F value. Default: 10000.</div>
+                <div class="settings-action-row">
+                  <input id="g0-speed-input" class="text-input" type="number" value="10000" min="1" step="1" style="width:120px;">
+                  <button id="set-g0-speed-btn" class="primary-button" style="background:var(--cyan);color:#fff;">Apply Speed</button>
+                  <span id="g0-speed-status" class="settings-status-text"></span>
+                </div>
+              </div>
+              
+              <!-- Workspace section -->
+              <div class="field-section">
+                <div class="field-group-title">Workspace Size (mm)</div>
+                <div class="field-description">Work area dimensions displayed on the 2D drawing.</div>
+                <div class="settings-input-grid-2x1">
+                  <div>
+                    <label class="field-label" for="workspace-width-input">Width X (mm)</label>
+                    <input id="workspace-width-input" class="text-input" type="number" value="170" min="1" step="1">
+                  </div>
+                  <div>
+                    <label class="field-label" for="workspace-height-input">Height Y (mm)</label>
+                    <input id="workspace-height-input" class="text-input" type="number" value="170" min="1" step="1">
+                  </div>
+                </div>
+                <div class="settings-action-row">
+                  <button id="set-workspace-btn" class="primary-button" style="background:var(--cyan);color:#fff;">Apply Workspace</button>
+                  <span id="workspace-status" class="settings-status-text"></span>
+                </div>
+              </div>
             </div>
-            <div style="display:flex;gap:8px;align-items:center;">
-              <input id="g0-speed-input" class="text-input" type="number" value="10000" min="1" step="1" style="width:160px;">
-              <button id="set-g0-speed-btn" class="primary-button" style="background:var(--cyan);color:#fff;">Apply</button>
-              <span id="g0-speed-status" style="font-size:11px;color:var(--muted);"></span>
+
+            <!-- Card 4: G54–G59 WCS Offsets -->
+            <div class="panel settings-card">
+              <div class="panel-header">
+                <div>
+                  <div class="panel-title">G54–G59 Work Coordinate Offsets</div>
+                  <div class="panel-subtitle">Offsets added to G-code. Select active WCS and set values.</div>
+                </div>
+              </div>
+              
+              <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">
+                <label class="field-label" for="wcs-select" style="margin-bottom:0 !important; white-space:nowrap;">Active WCS:</label>
+                <select id="wcs-select" style="width:80px;">
+                  <option value="G54">G54</option>
+                  <option value="G55">G55</option>
+                  <option value="G56">G56</option>
+                  <option value="G57">G57</option>
+                  <option value="G58">G58</option>
+                  <option value="G59">G59</option>
+                </select>
+              </div>
+              
+              <div class="settings-input-grid-2x1">
+                <div>
+                  <label class="field-label" for="wcs-offset-x">Offset X (mm)</label>
+                  <input id="wcs-offset-x" class="text-input" type="number" value="0" step="0.001">
+                </div>
+                <div>
+                  <label class="field-label" for="wcs-offset-y">Offset Y (mm)</label>
+                  <input id="wcs-offset-y" class="text-input" type="number" value="0" step="0.001">
+                </div>
+              </div>
+              
+              <div class="settings-action-row">
+                <button id="set-wcs-btn" class="primary-button" style="background:var(--cyan);color:#fff;">Apply WCS Offset</button>
+                <span id="wcs-status" class="settings-status-text"></span>
+              </div>
             </div>
+
           </div>
 
-          <!-- Z Offsets -->
-          <div style="margin-top:24px;padding-top:16px;border-top:1px solid var(--border);">
-            <div style="font-size:13px;font-weight:600;color:var(--text-main);margin-bottom:4px;">Workspace Size (mm)</div>
-            <div style="font-size:11px;color:var(--muted);margin-bottom:10px;">
-              Work area dimensions displayed on the 2D drawing (dashed blue border).
-            </div>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
-              <div>
-                <div style="font-size:11px;color:var(--muted);margin-bottom:4px;">Width X (mm)</div>
-                <input id="workspace-width-input" class="text-input" type="number" value="170" min="1" step="1">
-              </div>
-              <div>
-                <div style="font-size:11px;color:var(--muted);margin-bottom:4px;">Height Y (mm)</div>
-                <input id="workspace-height-input" class="text-input" type="number" value="170" min="1" step="1">
-              </div>
-            </div>
-            <div style="display:flex;align-items:center;gap:8px;margin-top:8px;">
-              <button id="set-workspace-btn" class="primary-button" style="background:var(--cyan);color:#fff;">Apply Workspace</button>
-              <span id="workspace-status" style="font-size:11px;color:var(--muted);"></span>
-            </div>
-          </div>
-
-          <!-- DXF Offset + Speed -->
-          <div style="margin-top:24px;padding-top:16px;border-top:1px solid var(--border);">
-            <div style="font-size:13px;font-weight:600;color:var(--text-main);margin-bottom:4px;">DXF Offset & Speed</div>
-            <div style="font-size:11px;color:var(--muted);margin-bottom:10px;">
-              Offset added to DXF coordinates when sending to PLC. Speed applies to all DXF commands. Only affects DXF files, not G-code.
-            </div>
-            <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr 1fr;gap:12px;">
-              <div>
-                <div style="font-size:11px;color:var(--muted);margin-bottom:4px;">Offset X (mm)</div>
-                <input id="offset-x-input" class="text-input" type="number" value="0" step="0.001">
-              </div>
-              <div>
-                <div style="font-size:11px;color:var(--muted);margin-bottom:4px;">Offset Y (mm)</div>
-                <input id="offset-y-input" class="text-input" type="number" value="0" step="0.001">
-              </div>
-              <div>
-                <div style="font-size:11px;color:var(--muted);margin-bottom:4px;">Speed (mm/min)</div>
-                <input id="global-speed-input" class="text-input" type="number" value="1000" step="1">
-              </div>
-              <div>
-                <div style="font-size:11px;color:var(--muted);margin-bottom:4px;">Dwell M03 (ms)</div>
-                <input id="dwell-m3-input" class="text-input" type="number" value="100" step="1" title="Wait time at dispensing start">
-              </div>
-              <div>
-                <div style="font-size:11px;color:var(--muted);margin-bottom:4px;">Dwell M04 (ms)</div>
-                <input id="dwell-m4-input" class="text-input" type="number" value="100" step="1" title="Wait time at dispensing end">
-              </div>
-            </div>
-            <div style="display:flex;align-items:center;gap:8px;margin-top:8px;">
-              <button id="apply-offset-btn" class="primary-button" style="background:var(--cyan);color:#fff;">Apply DXF Settings</button>
-              <span id="offset-status" style="font-size:11px;color:var(--muted);"></span>
-            </div>
-          </div>
-
-          <!-- G54-G59 Work Coordinate Offsets (G-code) -->
-          <div style="margin-top:24px;padding-top:16px;border-top:1px solid var(--border);">
-            <div style="font-size:13px;font-weight:600;color:var(--text-main);margin-bottom:4px;">G54–G59 Work Coordinate Offsets (mm)</div>
-            <div style="font-size:11px;color:var(--muted);margin-bottom:10px;">
-              Offset added to G-code coordinates when sending to PLC. Select work coordinate system (G54–G59) and enter X, Y offset.
-              Only affects G-code files, not DXF.
-            </div>
-            <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;">
-              <label style="font-size:11px;color:var(--muted);">Active WCS:</label>
-              <select id="wcs-select" class="text-input" style="width:80px;padding:4px 8px;">
-                <option value="G54">G54</option>
-                <option value="G55">G55</option>
-                <option value="G56">G56</option>
-                <option value="G57">G57</option>
-                <option value="G58">G58</option>
-                <option value="G59">G59</option>
-              </select>
-            </div>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
-              <div>
-                <div style="font-size:11px;color:var(--muted);margin-bottom:4px;">Offset X (mm)</div>
-                <input id="wcs-offset-x" class="text-input" type="number" value="0" step="0.001">
-              </div>
-              <div>
-                <div style="font-size:11px;color:var(--muted);margin-bottom:4px;">Offset Y (mm)</div>
-                <input id="wcs-offset-y" class="text-input" type="number" value="0" step="0.001">
-              </div>
-            </div>
-            <div style="display:flex;align-items:center;gap:8px;margin-top:8px;">
-              <button id="set-wcs-btn" class="primary-button" style="background:var(--cyan);color:#fff;">Apply WCS Offset</button>
-              <span id="wcs-status" style="font-size:11px;color:var(--muted);"></span>
-            </div>
-          </div>
-
-          <div style="margin-top:16px;padding-top:16px;border-top:1px solid var(--border);font-size:11px;color:var(--muted);">
-            All settings are saved to app_settings.txt and auto-loaded on startup.
-          </div>
+        </div>
+        
+        <div style="margin-top:4px; font-size:9px; color:var(--muted); text-align:center;">
+          All settings are saved to app_settings.txt and auto-loaded on startup.
         </div>
       </section>
 

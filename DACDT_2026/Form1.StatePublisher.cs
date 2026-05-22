@@ -98,11 +98,13 @@ namespace DACDT_2026
             var snapView       = currentView;
             var snapTheme      = currentTheme;
             var snapSpeed      = globalSpeed;
+            var snapSpeedM3    = globalSpeedM3;
             var snapOx         = offsetX;
             var snapOy         = offsetY;
             var snapPointKey   = selectedCadPointKey ?? string.Empty;
             var snapAssigned   = new System.Collections.Generic.Dictionary<string, string>(assignedPointKeys);
             var snapRawText    = snapKind == "GCODE" ? rawGcodeText : string.Empty;
+            var snapProfiles   = GetProfilesList();
 
             // Serialize toàn bộ payload trên background thread — không block UI
             string json = await Task.Run(() =>
@@ -218,6 +220,7 @@ namespace DACDT_2026
                     fileName = snapDoc?.FileName ?? string.Empty,
                     rawText  = rawTrunc,
                     globalSpeed = snapSpeed,
+                    globalSpeedM3 = snapSpeedM3,
                     rapidSpeed = rapidSpeed,
                     globalDwellM3 = globalDwellM3,
                     globalDwellM4 = globalDwellM4,
@@ -240,7 +243,8 @@ namespace DACDT_2026
                     points           = ptList,
                     selectedPointKey = snapPointKey,
                     assignedPointKeys = snapAssigned,
-                    processRows      = rowList
+                    processRows      = rowList,
+                    profiles         = snapProfiles
                 };
 
                 return serializer.Serialize(new { type = "dxfState", payload });
