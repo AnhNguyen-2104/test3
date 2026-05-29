@@ -18,6 +18,7 @@ const state = {
 const dom = {};
 let modalSubmit = null;
 let cadPanX = 0, cadPanY = 0, cadZoom = 1, isCadPanning = false, startCadPanX = 0, startCadPanY = 0;
+let _lastLoadedFile = ""; // Track để reset view khi mở file mới
 
 // Global function to update G-code line numbers
 function updateGcodeLineNumbers() {
@@ -291,6 +292,15 @@ function bindEvents() {
       post("newGcode");
     });
   }
+
+  // Nút Fit View — reset pan/zoom về 0 và re-render toàn bộ bản vẽ
+  const fitViewBtn = document.getElementById("fit-view-btn");
+  if (fitViewBtn) {
+    fitViewBtn.addEventListener("click", () => {
+      cadPanX = 0; cadPanY = 0; cadZoom = 1;
+      renderCadPreview();
+    });
+  }
   dom.assignButtons.forEach(b => b.addEventListener("click", () => {
     if (!state.dxf.selectedPointKey) { showToast("info", "DXF", "Please select a point before assigning."); return; }
     post("assignPoint", { slot: b.dataset.assignSlot, key: state.dxf.selectedPointKey });
@@ -344,20 +354,36 @@ function bindEvents() {
     post("selectCadPoint", { key: state.dxf.selectedPointKey });
   });
   dom.cadPreview.addEventListener("wheel", e => {
-    e.preventDefault(); const d = e.deltaY > 0 ? -0.1 : 0.1;
+    e.preventDefault();
+    const factor = e.deltaY > 0 ? 0.85 : 1.15; // zoom mượt hơn
     const rect = dom.cadPreview.getBoundingClientRect();
-    const mx = e.clientX - rect.left, my = e.clientY - rect.top;
-    const old = cadZoom; cadZoom = Math.max(0.1, Math.min(10, cadZoom + d));
-    const sc = cadZoom / old; cadPanX = mx - (mx - cadPanX) * sc; cadPanY = my - (my - cadPanY) * sc;
+    // Quy đổi vị trí chuột sang SVG viewBox coordinates (1000x560)
+    const svgX = (e.clientX - rect.left) / rect.width  * 1000;
+    const svgY = (e.clientY - rect.top)  / rect.height * 560;
+    const newZoom = Math.max(0.08, Math.min(20, cadZoom * factor));
+    const ratio = newZoom / cadZoom;
+    cadPanX = svgX - ratio * (svgX - cadPanX);
+    cadPanY = svgY - ratio * (svgY - cadPanY);
+    cadZoom = newZoom;
     updateCadTransform();
   });
   dom.cadPreview.addEventListener("mousedown", e => {
     if (e.button === 1 || (e.button === 0 && !e.target.closest("[data-point-key]"))) {
-      e.preventDefault(); isCadPanning = true; startCadPanX = e.clientX - cadPanX; startCadPanY = e.clientY - cadPanY;
+      e.preventDefault(); isCadPanning = true;
+      const rect = dom.cadPreview.getBoundingClientRect();
+      // Lưu toạ độ SVG viewBox của điểm bắt đầu kéo
+      startCadPanX = (e.clientX - rect.left) / rect.width  * 1000 - cadPanX;
+      startCadPanY = (e.clientY - rect.top)  / rect.height * 560  - cadPanY;
       dom.cadPreview.style.cursor = "grabbing";
     }
   });
-  dom.cadPreview.addEventListener("mousemove", e => { if (!isCadPanning) return; cadPanX = e.clientX - startCadPanX; cadPanY = e.clientY - startCadPanY; updateCadTransform(); });
+  dom.cadPreview.addEventListener("mousemove", e => {
+    if (!isCadPanning) return;
+    const rect = dom.cadPreview.getBoundingClientRect();
+    cadPanX = (e.clientX - rect.left) / rect.width  * 1000 - startCadPanX;
+    cadPanY = (e.clientY - rect.top)  / rect.height * 560  - startCadPanY;
+    updateCadTransform();
+  });
   dom.cadPreview.addEventListener("mouseup", () => { isCadPanning = false; dom.cadPreview.style.cursor = "grab"; });
   dom.cadPreview.addEventListener("mouseleave", () => { isCadPanning = false; dom.cadPreview.style.cursor = "grab"; });
 
@@ -925,12 +951,19 @@ function renderDxf() {
     if (gcodeContainer) gcodeContainer.style.display = "none";
   }
 
+  // Reset pan/zoom về fit-screen mỗi khi mở file mới
+  const newFileKey = (state.dxf.filePath || "") + "|" + (state.dxf.fileName || "");
+  if (newFileKey && newFileKey !== "|" && newFileKey !== _lastLoadedFile) {
+    _lastLoadedFile = newFileKey;
+    cadPanX = 0; cadPanY = 0; cadZoom = 1;
+  }
+
   renderPointsTable(); renderProcessTable(); renderCadPreview(); updateNavState();
 }
 
 function renderPointsTable() {
   const points = state.dxf.points || [], primitives = state.dxf.primitives || [], rows = [];
-  const MAX_VISIBLE_PRIMS = 500; // Giới hạn số primitive hiển thị để tránh lag UI
+  // Hiển thị toàn bộ primitives (không giới hạn)
   function pz(p) { return p && p.z != null ? Number(p.z) : 0; }
 
   // Build lookup map một lần O(n) thay vì find() O(n) mỗi điểm
@@ -945,9 +978,7 @@ function renderPointsTable() {
   }
 
   let ai = 1;
-  const primsToRender = primitives.length > MAX_VISIBLE_PRIMS
-    ? primitives.slice(0, MAX_VISIBLE_PRIMS)
-    : primitives;
+  const primsToRender = primitives; // Hiển thị tất cả
   for (const prim of primsToRender) {
     if (!prim.points || !prim.points.length) continue;
     let dt = "Line";
@@ -977,18 +1008,17 @@ function renderPointsTable() {
       rows.push(`<tr data-point-key="${esc(key)}"><td>${esc(stt)}</td><td>${esc(dt)}</td><td>${Number(s.x).toFixed(3)}</td><td>${Number(s.y).toFixed(3)}</td><td>${pz(s).toFixed(3)}</td><td>${Number(e.x).toFixed(3)}</td><td>${Number(e.y).toFixed(3)}</td><td>${pz(e).toFixed(3)}</td><td>${esc(cx)}</td><td>${esc(cy)}</td><td>${esc(cz)}</td></tr>`);
     }
   }
-  if (primitives.length > MAX_VISIBLE_PRIMS) {
-    rows.push(`<tr><td colspan="11" style="text-align:center;color:var(--muted);font-style:italic;">... ${primitives.length - MAX_VISIBLE_PRIMS} primitive khác bị ẩn để tăng tốc UI (tổng ${primitives.length})</td></tr>`);
+  // Hiện tổng số dòng ở cuối bảng
+  if (primitives.length > 0) {
+    rows.push(`<tr><td colspan="11" style="text-align:center;color:var(--muted);font-size:10px;padding:6px;">Tổng cộng: ${rows.length} dòng từ ${primitives.length} primitive</td></tr>`);
   }
   dom.pointsBody.innerHTML = rows.join("");
 }
 
 function renderProcessTable() {
   const rows = state.dxf.processRows || [];
-  const MAX_VISIBLE = 300;
-  const visible = rows.slice(0, MAX_VISIBLE);
-  const overflow = rows.length - visible.length;
-  dom.processBody.innerHTML = visible.map((r, i) => {
+  // Hiển thị toàn bộ rows (không giới hạn)
+  dom.processBody.innerHTML = rows.map((r, i) => {
     const endDisp   = r.endCoordinateDisplay   || r.endCoordinate   || "";
     const centDisp  = r.centerCoordinateDisplay || r.centerCoordinate || "";
     // Tách X;Y từ endCoordinate và centerCoordinate
@@ -1011,7 +1041,7 @@ function renderProcessTable() {
       <td style="font-family:monospace;font-size:11px;color:var(--muted);">${esc(centX)}</td>
       <td style="font-family:monospace;font-size:11px;color:var(--muted);">${esc(centY)}</td>
     </tr>`;
-  }).join("") + (overflow > 0 ? `<tr><td colspan="10" style="text-align:center;color:var(--muted);font-size:11px;padding:6px;">... ${overflow} more rows (total ${rows.length})</td></tr>` : "");
+  }).join("") + (rows.length > 0 ? `<tr><td colspan="10" style="text-align:center;color:var(--muted);font-size:10px;padding:6px;">Tổng cộng: ${rows.length} dòng</td></tr>` : "");
 }
 
 // ── Export Process Table to Excel (.xlsx) ────────────────────────────────────
@@ -1165,7 +1195,8 @@ function exportProcessTableCSV() {
 }
 
 function renderCadPreview() {
-  const primitives = state.dxf.primitives || [], points = state.dxf.points || [], bounds = state.dxf.bounds || { left: 0, top: 0, width: 100, height: 100 };
+  const primitives = state.dxf.primitives || [], points = state.dxf.points || [];
+  const serverBounds = state.dxf.bounds || { left: 0, top: 0, width: 100, height: 100 };
   const isGcode = (state.dxf.fileKind || "").toUpperCase() === "GCODE";
   if (!primitives.length) { dom.cadPreview.innerHTML = ""; dom.cadPlaceholder.classList.remove("hidden"); return; }
   dom.cadPlaceholder.classList.add("hidden");
@@ -1183,19 +1214,47 @@ function renderCadPreview() {
     viewOffsetY = state.dxf.offsetY || 0;
   }
 
+  // Tính lại bounds từ TẤT CẢ primitives để đảm bảo hiển thị đủ file
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  let hasPts = false;
+  for (const pr of primitives) {
+    if (!pr.points) continue;
+    for (const pt of pr.points) {
+      const px2 = (pt.x || 0) + viewOffsetX;
+      const py2 = (pt.y || 0) + viewOffsetY;
+      if (px2 < minX) minX = px2;
+      if (py2 < minY) minY = py2;
+      if (px2 > maxX) maxX = px2;
+      if (py2 > maxY) maxY = py2;
+      hasPts = true;
+    }
+    // Tính cả center nếu có (arc/circle)
+    if (pr.center) {
+      const cx2 = (pr.center.x || 0) + viewOffsetX;
+      const cy2 = (pr.center.y || 0) + viewOffsetY;
+      if (cx2 < minX) minX = cx2;
+      if (cy2 < minY) minY = cy2;
+      if (cx2 > maxX) maxX = cx2;
+      if (cy2 > maxY) maxY = cy2;
+    }
+  }
+  // Fallback về server bounds nếu không có điểm
+  if (!hasPts) {
+    minX = serverBounds.left + viewOffsetX;
+    minY = serverBounds.top + viewOffsetY;
+    maxX = minX + (serverBounds.width || 100);
+    maxY = minY + (serverBounds.height || 100);
+  }
+
   const W = 1000, H = 560;
   const zPanelH = 0;
   const xyH = H - zPanelH;
-  const pad = 28;
-  // Bounds mở rộng để chứa cả bản vẽ (có offset) và gốc tọa độ (0,0)
-  const drawLeft = bounds.left + viewOffsetX;
-  const drawTop = bounds.top + viewOffsetY;
-  const drawRight = drawLeft + (bounds.width || 0);
-  const drawBottom = drawTop + (bounds.height || 0);
-  const effLeft = Math.min(0, drawLeft);
-  const effTop = Math.min(0, drawTop);
-  const effRight = Math.max(drawRight, state.dxf.workspaceWidth || 170);
-  const effBottom = Math.max(drawBottom, state.dxf.workspaceHeight || 170);
+  const pad = 36;
+  // Mở rộng bounds để chứa gốc tọa độ (0,0) và workspace
+  const effLeft   = Math.min(0, minX);
+  const effTop    = Math.min(0, minY);
+  const effRight  = Math.max(maxX, state.dxf.workspaceWidth  || 170);
+  const effBottom = Math.max(maxY, state.dxf.workspaceHeight || 170);
   const ww = Math.max(effRight - effLeft, 1), wh = Math.max(effBottom - effTop, 1);
   const sc = Math.min((W - pad * 2) / ww, (xyH - pad * 2) / wh), ox = (W - ww * sc) / 2, oy = (xyH - wh * sc) / 2;
   // projAbs: project tọa độ tuyệt đối (cho marker, workspace, trục)
