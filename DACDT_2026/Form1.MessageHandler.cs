@@ -172,7 +172,7 @@ namespace DACDT_2026
                         break;
 
                     case "sendCadX":
-                        await HandleSendCadXAsync();
+                        _ = HandleSendCadXAsync(); // Fire-and-forget — không block message handler
                         break;
 
                     case "clearBuffer":

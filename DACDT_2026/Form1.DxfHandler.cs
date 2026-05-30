@@ -1014,7 +1014,11 @@ namespace DACDT_2026
                                 MotionType       = motionPrefix + currentSuffix,
                                 EndCoordinate    = string.Format(CultureInfo.InvariantCulture,
                                     "{0:0.###};{1:0.###}", pt.X, pt.Y),
+                                EndXMm           = pt.X,      // ← NEW: Pre-parsed
+                                EndYMm           = pt.Y,      // ← NEW: Pre-parsed
                                 CenterCoordinate = string.Empty,
+                                CenterXMm        = 0,         // ← NEW: No center for lines
+                                CenterYMm        = 0,         // ← NEW: No center for lines
                                 MCodeValue       = string.Empty,
                                 EndZ             = endZ
                             };
@@ -1047,6 +1051,10 @@ namespace DACDT_2026
                             MotionType    = arcType + suffix,
                             EndCoordinate = string.Format(CultureInfo.InvariantCulture,
                                 "{0:0.###};{1:0.###}", endPt.X, endPt.Y),
+                            EndXMm        = endPt.X,         // ← NEW: Pre-parsed
+                            EndYMm        = endPt.Y,         // ← NEW: Pre-parsed
+                            CenterXMm     = prim.Center?.X ?? 0,  // ← NEW: Pre-parsed center
+                            CenterYMm     = prim.Center?.Y ?? 0,  // ← NEW: Pre-parsed center
                             MCodeValue    = string.Empty,
                             EndZ          = endZ
                         };

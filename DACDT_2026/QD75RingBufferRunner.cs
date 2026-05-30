@@ -29,6 +29,11 @@ namespace DACDT_2026
 
         private int nextRowIndex;
         private int totalPointsLoaded;
+        
+        // ← NEW: For timer-based optimization (Cách 2)
+        private double cachedPathDistToFirstHalf = 0;
+        private double cachedPathDistToSecondHalf = 0;
+        private int cachedCurrentSpeed = 0;
 
         public event Action<int, int> OnProgress; // (loaded, total)
         public event Action<string> OnLog;
@@ -84,6 +89,9 @@ namespace DACDT_2026
                     initialRows[BUFFER_SIZE - 1] = jumpRow;
                     nextRowIndex = BUFFER_SIZE - 1; // Tiếp theo nạp từ điểm 599 trở đi
                     Log($"Ring buffer mode: {allRows.Count} points total. Loading first {BUFFER_SIZE - 1} points + JUMP.");
+                    
+                    // ← NEW (Cách 2): Calculate timing once at start
+                    CalculateRefillTiming();
                 }
                 else
                 {
@@ -103,7 +111,8 @@ namespace DACDT_2026
                 }
 
                 // Bước 2: Monitor Md.44 và ghi đè cuốn chiếu
-                await MonitorAndRefillAsync(cts.Token);
+                // ← NEW (Cách 2): Use timer-based monitoring instead of polling
+                await MonitorAndRefillWithTimerAsync(cts.Token);
 
                 Log("Ring buffer complete — all points loaded.");
                 OnComplete?.Invoke();
@@ -124,7 +133,210 @@ namespace DACDT_2026
         }
 
         /// <summary>
+        /// ← NEW (Cách 2): Calculate path distance and timing for refill points.
+        /// Do this ONCE at startup instead of polling every 50ms.
+        /// </summary>
+        private void CalculateRefillTiming()
+        {
+            try
+            {
+                // Calculate distance from point 0 to point 300 (first half)
+                cachedPathDistToFirstHalf = CalculatePathDistanceMm(0, HALF_SIZE);
+                
+                // Calculate distance from point 300 to point 600 (second half)
+                cachedPathDistToSecondHalf = CalculatePathDistanceMm(HALF_SIZE, Math.Min(BUFFER_SIZE - 1, allRows.Count));
+                
+                // Read current speed from PLC (1 read only)
+                cachedCurrentSpeed = ReadCurrentSpeedFromPLC();
+                if (cachedCurrentSpeed <= 0) cachedCurrentSpeed = 100; // Fallback
+                
+                // Convert speed: mm/min → mm/ms
+                double speedMmPerMs = cachedCurrentSpeed / 60000.0;
+                
+                // Calculate wait time (refill at 90% to be safe)
+                double timeToFirstHalfMs = (cachedPathDistToFirstHalf / speedMmPerMs) * 0.9;
+                double timeToSecondHalfMs = (cachedPathDistToSecondHalf / speedMmPerMs) * 0.9;
+                
+                Log($"Path dist (0-300): {cachedPathDistToFirstHalf:F1}mm @ {cachedCurrentSpeed}mm/min = {timeToFirstHalfMs:F0}ms");
+                Log($"Path dist (300-600): {cachedPathDistToSecondHalf:F1}mm @ {cachedCurrentSpeed}mm/min = {timeToSecondHalfMs:F0}ms");
+            }
+            catch (Exception ex)
+            {
+                Log($"Warning: Failed to calculate timing: {ex.Message}. Falling back to polling.");
+                cachedCurrentSpeed = 0; // Signal to use polling fallback
+            }
+        }
+
+        /// <summary>
+        /// ← NEW (Cách 2): Calculate total distance between two point indices.
+        /// </summary>
+        private double CalculatePathDistanceMm(int startPointIndex, int endPointIndex)
+        {
+            double totalDistance = 0;
+            
+            for (int i = startPointIndex; i < Math.Min(endPointIndex, allRows.Count - 1); i++)
+            {
+                var currRow = allRows[i];
+                var nextRow = allRows[i + 1];
+                
+                // Parse coordinates from EndCoordinate string
+                double x1 = ParseCoordValue(currRow.EndCoordinate, 0);  // X
+                double y1 = ParseCoordValue(currRow.EndCoordinate, 1);  // Y
+                double x2 = ParseCoordValue(nextRow.EndCoordinate, 0);
+                double y2 = ParseCoordValue(nextRow.EndCoordinate, 1);
+                
+                // Euclidean distance
+                double dx = x2 - x1;
+                double dy = y2 - y1;
+                double distance = Math.Sqrt(dx * dx + dy * dy);
+                
+                totalDistance += distance;
+            }
+            
+            return totalDistance;
+        }
+
+        /// <summary>
+        /// ← NEW (Cách 2): Parse single coordinate value from "X;Y" string.
+        /// </summary>
+        private double ParseCoordValue(string coordinate, int axis)
+        {
+            // axis: 0=X, 1=Y
+            if (string.IsNullOrWhiteSpace(coordinate)) return 0;
+            
+            var parts = coordinate.Split(';');
+            if (parts.Length <= axis) return 0;
+            
+            double.TryParse(parts[axis], 
+                System.Globalization.NumberStyles.Any,
+                System.Globalization.CultureInfo.InvariantCulture,
+                out double value);
+            return value;
+        }
+
+        /// <summary>
+        /// ← NEW (Cách 2): Read current speed from PLC (1 read only).
+        /// </summary>
+        private int ReadCurrentSpeedFromPLC()
+        {
+            try
+            {
+                string device = $"U0\\G{804}";  // Md.17 Current Speed (Axis1)
+                return plcComm.ReadDeviceValue(device);
+            }
+            catch
+            {
+                return 0;  // Fallback
+            }
+        }
+
+        /// <summary>
+        /// ← NEW (Cách 2): Monitor using Timer-based callbacks instead of polling loop.
+        /// Eliminates 300+ ReadMd44() calls, saving 2-3 seconds.
+        /// </summary>
+        private async Task MonitorAndRefillWithTimerAsync(CancellationToken ct)
+        {
+            // If timing calculation failed, fall back to polling
+            if (cachedCurrentSpeed <= 0)
+            {
+                Log("Timing calculation unavailable, using polling fallback.");
+                await MonitorAndRefillAsync(ct);
+                return;
+            }
+
+            try
+            {
+                double speedMmPerMs = cachedCurrentSpeed / 60000.0;
+                
+                // Calculate wait times (refill at 90% to be safe)
+                double timeToFirstHalfMs = (cachedPathDistToFirstHalf / speedMmPerMs) * 0.9;
+                double timeToSecondHalfMs = (cachedPathDistToSecondHalf / speedMmPerMs) * 0.9;
+                
+                // Timer 1: Refill first half (at calculated time)
+                var timer1 = new System.Timers.Timer(timeToFirstHalfMs);
+                timer1.AutoReset = false;
+                timer1.Elapsed += async (s, e) =>
+                {
+                    try
+                    {
+                        Log("Timer 1: Refilling first half (1-300)...");
+                        
+                        int countToWrite = Math.Min(HALF_SIZE, allRows.Count - nextRowIndex);
+                        if (countToWrite > 0)
+                        {
+                            var batch = allRows.GetRange(nextRowIndex, countToWrite);
+                            await Task.Run(() => WriteBufferRange(batch, 0));
+                            nextRowIndex += countToWrite;
+                            totalPointsLoaded += countToWrite;
+                            
+                            OnProgress?.Invoke(totalPointsLoaded, allRows.Count);
+                            Log($"Refilled 1-300: {totalPointsLoaded}/{allRows.Count} points loaded");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        OnError?.Invoke($"Refill 1 failed: {ex.Message}");
+                    }
+                };
+                timer1.Start();
+
+                // Timer 2: Refill second half (at calculated time)
+                var timer2 = new System.Timers.Timer(timeToFirstHalfMs + timeToSecondHalfMs);
+                timer2.AutoReset = false;
+                timer2.Elapsed += async (s, e) =>
+                {
+                    try
+                    {
+                        Log("Timer 2: Refilling second half (301-600)...");
+                        
+                        int countToWrite = Math.Min(HALF_SIZE - 1, allRows.Count - nextRowIndex);
+                        if (countToWrite > 0)
+                        {
+                            var batch = allRows.GetRange(nextRowIndex, countToWrite);
+                            
+                            // Last batch? Set END instead of JUMP
+                            bool isLastBatch = (nextRowIndex + countToWrite >= allRows.Count);
+                            if (!isLastBatch)
+                            {
+                                batch.Add(new QD75BufferWriter.PositioningDataRow
+                                {
+                                    MotionType = "JUMP_TO_1",
+                                    EndCoordinate = "0;0",
+                                    Speed = "0"
+                                });
+                            }
+                            
+                            await Task.Run(() => WriteBufferRange(batch, HALF_SIZE));
+                            nextRowIndex += countToWrite;
+                            totalPointsLoaded += countToWrite;
+                            
+                            OnProgress?.Invoke(totalPointsLoaded, allRows.Count);
+                            Log($"Refilled 301-600: {totalPointsLoaded}/{allRows.Count} points");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        OnError?.Invoke($"Refill 2 failed: {ex.Message}");
+                    }
+                };
+                timer2.Start();
+
+                // Wait for all timers to complete + safety buffer
+                double totalWaitMs = timeToFirstHalfMs + timeToSecondHalfMs + 5000;
+                await Task.Delay((int)totalWaitMs, ct);
+                
+                timer1?.Dispose();
+                timer2?.Dispose();
+            }
+            catch (Exception ex)
+            {
+                OnError?.Invoke($"Timer-based monitoring failed: {ex.Message}");
+            }
+        }
+
+        /// <summary>
         /// Monitor Md.44 → khi máy chạy qua nửa buffer, ghi đè 300 điểm tiếp theo.
+        /// (Fallback polling method - used if timing calculation fails)
         /// </summary>
         private async Task MonitorAndRefillAsync(CancellationToken ct)
         {

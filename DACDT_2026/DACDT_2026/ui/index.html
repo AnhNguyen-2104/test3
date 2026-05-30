@@ -1,0 +1,626 @@
+<!DOCTYPE html>
+<html lang="en" class="theme-dark">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Gantry SCADA Robot Control</title>
+  <link rel="stylesheet" href="styles.css">
+  <script>
+    window.onerror = function(message, source, lineno, colno, error) {
+        console.error("Global error: ", message, source, lineno, colno, error);
+        alert("Global error: " + message + " at " + source + ":" + lineno);
+    };
+  </script>
+</head>
+
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="brand-block">
+        <div class="brand-title">DACDT 2026</div>
+        <nav class="top-nav">
+          <button class="nav-link is-active" data-view="control">DASHBOARD</button>
+          <button class="nav-link" data-view="logs">LOGS</button>
+          <button class="nav-link" data-view="telemetry">TELEMETRY</button>
+          <button class="nav-link" data-view="settings">SYSTEM SETTINGS</button>
+          <button class="nav-link" data-view="dxf">DXF/GCODE RUN</button>
+          <button class="nav-link" data-view="help">HELP</button>
+        </nav>
+      </div>
+      <div class="top-actions">
+        <button id="theme-toggle" class="icon-button" title="Toggle theme">◐</button>
+        <button class="icon-button" data-placeholder="NOTIFICATIONS" title="Notifications">!</button>
+        <button class="icon-button" data-placeholder="PROFILE" title="Profile">◎</button>
+      </div>
+    </header>
+
+    <aside class="sidebar">
+      <div class="unit-card" style="padding:8px 10px;align-items:center;gap:10px;">
+        <img src="AML.jpg" alt="AML" style="width:50px;height:50px;border-radius:6px;object-fit:contain;">
+        <div>
+          <div class="unit-title" style="font-size:14px;font-weight:800;">AML</div>
+          <div id="sidebar-status" style="font-size:10px;color:var(--muted);">Mitsu: DC</div>
+        </div>
+      </div>
+
+      <nav class="side-nav">
+        <button class="side-link is-active" data-view="control">CONTROL</button>
+        <button class="side-link" data-view="telemetry">TELEMETRY</button>
+        <button class="side-link" data-view="logs">LOGS</button>
+        <button class="side-link" data-view="settings">SETTINGS</button>
+        <button class="side-link" data-view="dxf">DXF/GCODE RUN</button>
+        <button class="side-link" data-view="help">HELP</button>
+      </nav>
+
+      <!-- Manual Jog in sidebar -->
+      <div class="sidebar-jog">
+        <div class="sidebar-jog-title">Manual Jog</div>
+        <div class="sidebar-jog-subtitle">M-register pulse control</div>
+        <div class="jog-layout-sidebar">
+          <div class="jog-pad-sm">
+            <button class="jog-btn-sm up" data-jog-offset="2">↑</button>
+            <button class="jog-btn-sm left" data-jog-offset="1">←</button>
+            <button class="jog-btn-sm right" data-jog-offset="0">→</button>
+            <button class="jog-btn-sm down" data-jog-offset="3">↓</button>
+            <div class="jog-center-sm">XY</div>
+          </div>
+          <div class="jog-z-stack-sm">
+            <button class="jog-btn-sm z" data-jog-offset="4">Z+</button>
+            <button class="jog-btn-sm z" data-jog-offset="5">Z-</button>
+          </div>
+        </div>
+        <div class="jog-addr-info">Manual Override Status: M3000-M3005</div>
+        <div class="jog-speed-card" style="margin: 12px; padding: 12px; background: rgba(255,255,255,0.03); border-radius: 8px; border: 1px solid var(--border);">
+          <div class="axis-field-label" style="font-size: 10px; color: var(--muted); margin-bottom: 4px;">JOG SPEED (D406 - cm/min)</div>
+          <div style="display: flex; gap: 4px;">
+            <input id="jog-speed-input" class="text-input compact" type="number" value="1000" step="0.001" style="flex: 1;">
+            <button id="set-jog-speed-btn" class="primary-button compact" style="min-width: 50px;">SET</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="sidebar-footer">
+        <button id="emergency-stop" class="danger-button full-width">EMERGENCY STOP</button>
+        <button id="exit-app-btn" class="side-footer-link" style="color:#ef4444;">EXIT APP</button>
+      </div>
+    </aside>
+
+    <main class="content">
+      <!-- ========== DASHBOARD ========== -->
+      <section id="view-control" class="view is-active">
+        <div class="dashboard-grid">
+          <!-- System Connectivity -->
+          <div class="panel panel-connection">
+            <div class="panel-header">
+              <div>
+                <div class="panel-title">System Connectivity</div>
+                <div class="panel-subtitle">Mitsubishi PLC Network Interface</div>
+              </div>
+            </div>
+
+            <div class="conn-section">
+              <div class="conn-label-row">
+                <span class="conn-brand">MITSUBISHI</span>
+                <span id="plc-status-dot" class="status-dot disconnected"></span>
+                <span id="plc-status-text" class="status-dot-text">DC</span>
+              </div>
+              <label class="field-label" for="plc-station">LOGICAL STATION NO.</label>
+              <input id="plc-station" class="text-input" type="number" value="0">
+              <button id="connect-button" class="primary-button full-width connect-btn-q">CONNECT PLC Q</button>
+              
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px;">
+                <button id="go-home-btn" class="primary-button compact">HOME <span style="font-size:9px;opacity:0.7">(M502)</span></button>
+                <button id="reset-error-btn" class="primary-button compact">RESET <span style="font-size:9px;opacity:0.7">(M300)</span></button>
+              </div>
+              <button id="start-btn" class="primary-button full-width" style="margin-top: 8px;">START ACTION <span style="font-size:9px;opacity:0.7">(M2000)</span></button>
+            </div>
+
+            <div id="connection-meta" class="muted-text" style="margin-top:12px;">MX Component logical station: 0</div>
+          </div>
+          
+          <!-- Program Monitor -->
+          <div class="panel panel-program-monitor" style="display:flex; flex-direction:column;">
+            <div class="panel-header">
+              <div>
+                <div class="panel-title">Program Monitor</div>
+                <div class="panel-subtitle">Current running line progress</div>
+              </div>
+            </div>
+            <div id="program-monitor-body" style="flex:1; overflow-y:auto; border:1px solid var(--border); border-radius:var(--radius-sm); background:rgba(0,0,0,0.2);">
+              <!-- Generated dynamically by app.js -->
+            </div>
+          </div>
+
+          <!-- Axis Monitor -->
+          <div class="panel panel-axis-monitor">
+            <div class="panel-header">
+              <div>
+                <div class="panel-title">Axis Monitor</div>
+                <div class="panel-subtitle">Real-time coordinate and axis status monitoring</div>
+              </div>
+            </div>
+            <div class="axis-grid" id="axis-grid">
+              <!-- Generated dynamically by app.js -->
+            </div>
+          </div>
+
+          <!-- Camera Feed -->
+          <div class="panel panel-camera">
+            <div class="panel-header" style="flex-wrap: wrap; gap: 8px;">
+              <div class="panel-title">Camera Feed</div>
+              <div style="display:flex; gap:8px; align-items:center;">
+                <select id="camera-select" class="text-input compact" style="margin:0; width:auto; min-width:150px; background:var(--panel-2); color:var(--text); border:1px solid var(--border-strong); border-radius:6px; height:32px;"></select>
+                <button id="toggle-camera-btn" class="primary-button compact">Start Camera</button>
+                <button id="record-camera-btn" class="primary-button compact" style="display:none; background:var(--orange);">Record</button>
+                <span id="record-indicator" style="display:none; color:var(--red); font-weight:bold; font-size:12px; animation: blink 1s infinite;">● REC</span>
+              </div>
+            </div>
+            <div class="camera-frame" style="background:#000; border-radius:var(--radius-md); overflow:hidden; display:flex; align-items:center; justify-content:center; min-height:450px; max-height:700px; position:relative;">
+              <video id="camera-stream" autoplay playsinline style="width:100%; height:100%; object-fit:contain;"></video>
+            </div>
+          </div>
+
+          <!-- System Events -->
+          <div class="panel panel-events">
+            <div class="panel-header">
+              <div>
+                <div class="panel-title">System Events</div>
+                <div class="panel-subtitle">DXF run progress · Errors · Connection events</div>
+              </div>
+              <button id="clear-events-button" class="text-button">Clear</button>
+            </div>
+            <div id="events-list" class="events-list">
+              <div id="events-empty" class="events-empty">No events yet.</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ========== LOGS ========== -->
+      <section id="view-logs" class="view">
+        <div class="panel">
+          <div class="panel-header">
+            <div>
+              <div class="panel-title">Logs</div>
+              <div class="panel-subtitle">PLC read/write transactions</div>
+            </div>
+            <div>
+              <button id="clear-logs-button" class="text-button">Clear</button>
+            </div>
+          </div>
+
+          <div class="table-frame">
+            <table class="data-table compact">
+              <thead>
+                <tr>
+                  <th>Time</th>
+                  <th>Dir</th>
+                  <th>Address</th>
+                  <th>Value</th>
+                  <th>Status</th>
+                  <th>Message</th>
+                </tr>
+              </thead>
+              <tbody id="logs-table-body"></tbody>
+            </table>
+            <div id="logs-empty" class="empty-state">No logs yet.</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ========== TELEMETRY ========== -->
+      <section id="view-telemetry" class="view">
+        <div class="panel">
+          <div class="panel-header">
+            <div>
+              <div class="panel-title">Telemetry</div>
+              <div class="panel-subtitle">Live D registers and Un\\Gx buffers</div>
+            </div>
+          </div>
+
+          <div class="telemetry-actions" style="margin-bottom: 12px; display:flex; gap:8px; align-items:center;">
+            <input id="telemetry-add-path" class="text-input compact" type="text"
+              placeholder="Add address: D100, M10, U0\G800..." style="flex: 1;" />
+            <input id="telemetry-add-len" class="text-input compact" type="number" placeholder="Length (if U\G)"
+              value="1" style="width: 130px;" />
+            <button id="telemetry-add-btn" class="primary-button compact">Add to List</button>
+          </div>
+
+          <div id="telemetry-content" class="telemetry-content">
+            <div class="telemetry-empty">No telemetry data. Connect PLC to activate.</div>
+          </div>
+          <div class="telemetry-actions" style="margin-top:12px; display:flex; gap:8px; align-items:center;">
+            <input id="write-buffer-path" class="text-input compact" type="text" placeholder="D100, M10, U0\G2006..." value="D100" style="width:240px;" />
+            <input id="write-buffer-value" class="text-input compact" type="number" placeholder="Value" value="12345" style="width:140px;" />
+            <button id="write-buffer-button" class="primary-button compact">Write Data</button>
+          </div>
+      </section>
+
+      <!-- ========== DXF RUN ========== -->
+      <section id="view-dxf" class="view">
+        <div class="panel dxf-toolbar">
+          <div class="toolbar-field toolbar-path">
+            <input id="cad-path" class="text-input compact" type="text" placeholder="CAD/G-code path" readonly>
+          </div>
+          <div class="toolbar-field toolbar-file" style="flex: 0 0 120px;">
+            <input id="cad-file" class="text-input compact" type="text" placeholder="File name" readonly>
+          </div>
+          <button id="new-gcode-btn" class="primary-button toolbar-open compact" style="background:var(--panel-3); border:1px solid var(--border); color:var(--text); min-height: 38px; padding: 0 12px; margin-right: 4px;" title="Create new G-code">New</button>
+          <button id="open-dxf" class="primary-button toolbar-open compact">Open</button>
+
+          <div style="flex:1;"></div>
+          <!-- RUN / HOME / RESET buttons -->
+          <button id="dxf-home-btn" class="primary-button compact" style="font-size:13px;padding:0 12px;margin-right:4px;">HOME</button>
+          <button id="dxf-reset-btn" class="primary-button compact" style="font-size:13px;padding:0 12px;margin-right:4px;">RESET</button>
+          <button id="run-action-btn" class="primary-button compact" style="font-size:13px;padding:0 16px;margin-right:8px;">RUN</button>
+          <!-- Progress Bar -->
+          <div id="dxf-progress-container" style="display:none; align-items:center; margin-right: 12px; gap: 8px;">
+            <div style="width: 150px; height: 8px; background: rgba(255,255,255,0.1); border-radius: 4px; overflow: hidden;">
+              <div id="dxf-progress-fill" style="width: 0%; height: 100%; background: var(--cyan); transition: width 0.1s linear;"></div>
+            </div>
+            <span id="dxf-progress-text" style="font-size: 11px; color: var(--muted); min-width: 30px;">0%</span>
+          </div>
+          <!-- Send to PLC -->
+          <div style="display:flex;align-items:center;gap:6px;">
+            <button id="clear-buffer-button" class="primary-button compact" style="background:#ef4444; font-size: 13px; padding: 0 16px;" title="Clear all PLC buffer (G2000+, G8000+, G14000+)">Clear Buffer</button>
+            <button id="send-cad-x-button" class="primary-button compact" style="background:linear-gradient(135deg, #10b981, #059669); font-size: 13px; padding: 0 16px;">Send CAD to PLC</button>
+            <span id="send-row-count" style="font-size:11px;color:var(--muted);white-space:nowrap;display:none;"></span>
+          </div>
+        </div>
+
+        <div class="dxf-grid">
+          <div class="panel panel-preview">
+            <div class="preview-frame">
+              <svg id="cad-preview" viewBox="0 0 1000 560" preserveAspectRatio="xMidYMid meet"></svg>
+              <div id="cad-placeholder" class="preview-placeholder">View CAD</div>
+            </div>
+          </div>
+
+          <div class="panel panel-points">
+            <div style="padding:8px 12px 4px;font-size:13px;font-weight:700;color:var(--text-main);">Geometry Data</div>
+            <div id="dxf-points-container" class="table-frame tall">
+              <table class="data-table compact points-table">
+                <thead>
+                  <tr>
+                    <th>No.</th>
+                    <th>Line type</th>
+                    <th>Start X</th>
+                    <th>Start Y</th>
+                    <th>Start Z</th>
+                    <th>End X</th>
+                    <th>End Y</th>
+                    <th>End Z</th>
+                    <th>Center X</th>
+                    <th>Center Y</th>
+                    <th>Center Z</th>
+                  </tr>
+                </thead>
+                <tbody id="points-table-body"></tbody>
+              </table>
+            </div>
+
+            <!-- G-code Editor Container -->
+            <div id="gcode-editor-container" class="table-frame tall" style="display:none; flex-direction:column; padding:0;">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; padding:0 8px;">
+                <span style="font-size:13px; font-weight:600; color:var(--muted)">G-code Editor</span>
+                <button id="save-gcode-btn" class="primary-button" style="padding:4px 12px; height:auto;">Save G-code</button>
+              </div>
+              <!-- Editor with line numbers -->
+              <div style="flex:1; display:flex; border:1px solid var(--border); border-radius:6px; overflow:hidden; background:var(--bg-panel);">
+                <div id="gcode-line-numbers" style="padding:8px 8px 8px 12px; background:rgba(0,0,0,0.2); color:var(--muted); font-family:monospace; font-size:12px; line-height:1.5; text-align:right; user-select:none; overflow:hidden; min-width:45px; border-right:1px solid var(--border); white-space:pre;"></div>
+                <textarea id="gcode-textarea" spellcheck="false" style="flex:1; resize:none; background:transparent; color:var(--text-main); border:none; padding:8px; font-family:monospace; font-size:12px; line-height:1.5; outline:none; overflow-y:auto;"></textarea>
+              </div>
+            </div>
+          </div>
+
+          <div class="panel panel-process">
+            <div style="padding:8px 12px 4px; display:flex; align-items:center; justify-content:space-between;">
+              <span style="font-size:13px;font-weight:700;color:var(--text-main);">Process Table</span>
+              <button id="export-csv-btn" class="primary-button compact" style="background:var(--panel-3); border:1px solid var(--border); color:var(--text); font-size:11px; padding:0 10px; height:28px;" title="Xuất Process Table ra file Excel 2 sheet (Axis1_X và Axis2_Y)">⬇ Export Excel</button>
+            </div>
+            <div class="table-frame short">
+              <table class="data-table compact process-spaced-table">
+                <thead>
+                  <tr>
+                    <th>#</th>
+                    <th>Motion type</th>
+                    <th>M code</th>
+                    <th>Dwell</th>
+                    <th>Speed</th>
+                    <th>End X</th>
+                    <th>End Y</th>
+                    <th>End Z</th>
+                    <th>Center X</th>
+                    <th>Center Y</th>
+                  </tr>
+                </thead>
+                <tbody id="process-table-body"></tbody>
+              </table>
+            </div>
+
+          </div>
+        </div>
+      </section>
+
+      <!-- ========== SYSTEM SETTINGS ========== -->
+      <section id="view-settings" class="view">
+        <div class="settings-grid">
+          
+          <!-- Left Column -->
+          <div class="settings-col">
+            
+            <!-- Card 1: DXF Offset & Speed -->
+            <div class="panel settings-card">
+              <div class="panel-header">
+                <div>
+                  <div class="panel-title">DXF Offset & Speed Settings</div>
+                  <div class="panel-subtitle">Parameters applied to DXF paths. Does not affect G-code.</div>
+                </div>
+              </div>
+              
+              <div class="settings-input-grid-3x2">
+                <div>
+                  <label class="field-label" for="offset-x-input">Offset X (mm)</label>
+                  <input id="offset-x-input" class="text-input" type="number" value="0" step="0.001">
+                </div>
+                <div>
+                  <label class="field-label" for="speed-m3-input" title="Speed for points with MCode = 3">Speed M03 (mm/min)</label>
+                  <input id="speed-m3-input" class="text-input" type="number" value="10000" step="1">
+                </div>
+                <div>
+                  <label class="field-label" for="dwell-m3-input" title="Wait time at dispensing start">Dwell M03 (ms)</label>
+                  <input id="dwell-m3-input" class="text-input" type="number" value="100" step="1">
+                </div>
+                <div>
+                  <label class="field-label" for="offset-y-input">Offset Y (mm)</label>
+                  <input id="offset-y-input" class="text-input" type="number" value="0" step="0.001">
+                </div>
+                <div>
+                  <label class="field-label" for="global-speed-input">Speed M04 (mm/min)</label>
+                  <input id="global-speed-input" class="text-input" type="number" value="1000" step="1">
+                </div>
+                <div>
+                  <label class="field-label" for="dwell-m4-input" title="Wait time at dispensing end">Dwell M04 (ms)</label>
+                  <input id="dwell-m4-input" class="text-input" type="number" value="100" step="1">
+                </div>
+              </div>
+              
+              <div class="settings-action-row">
+                <button id="apply-offset-btn" class="primary-button" style="background:var(--cyan);color:#fff;">Apply DXF Settings</button>
+                <span id="offset-status" class="settings-status-text"></span>
+              </div>
+            </div>
+
+            <!-- Card 2: Configuration Profiles -->
+            <div class="panel settings-card">
+              <div class="panel-header">
+                <div>
+                  <div class="panel-title">Configuration Profiles</div>
+                  <div class="panel-subtitle">Save current settings as a profile or load saved ones.</div>
+                </div>
+              </div>
+              
+              <div class="settings-input-grid-2x1">
+                <div>
+                  <label class="field-label" for="profile-name-input">New Profile Name</label>
+                  <input id="profile-name-input" class="text-input" type="text" placeholder="e.g. profile_fast">
+                </div>
+                <div>
+                  <label class="field-label" for="profile-select">Select Saved Profile</label>
+                  <select id="profile-select">
+                    <option value="">-- Chọn cấu hình đã lưu --</option>
+                  </select>
+                </div>
+              </div>
+              
+              <div class="settings-action-row">
+                <button id="save-profile-btn" class="primary-button" style="background:var(--cyan);color:#fff;">Save Profile</button>
+                <button id="load-profile-btn" class="primary-button" style="background:var(--green);color:#fff;">Load Profile</button>
+                <button id="delete-profile-btn" class="primary-button" style="background:var(--red);color:#fff;">Delete Profile</button>
+                <span id="profile-status" class="settings-status-text"></span>
+              </div>
+            </div>
+
+          </div>
+
+          <!-- Right Column -->
+          <div class="settings-col">
+            
+            <!-- Card 3: Machine General Config -->
+            <div class="panel settings-card">
+              <div class="panel-header">
+                <div>
+                  <div class="panel-title">Machine Config & Workspace</div>
+                  <div class="panel-subtitle">Rapid speed (G00) and drawing boundary dimensions.</div>
+                </div>
+              </div>
+              
+              <!-- Rapid Speed section -->
+              <div class="field-section" style="border-top:none; padding-top:0; margin-top:0;">
+                <div class="field-group-title">G00 Rapid Speed (mm/min)</div>
+                <div class="field-description" style="margin-bottom: 4px;">Applied to all G00 commands. Ignores F value. Default: 10000.</div>
+                <div class="settings-action-row">
+                  <input id="g0-speed-input" class="text-input" type="number" value="10000" min="1" step="1" style="width:120px;">
+                  <button id="set-g0-speed-btn" class="primary-button" style="background:var(--cyan);color:#fff;">Apply Speed</button>
+                  <span id="g0-speed-status" class="settings-status-text"></span>
+                </div>
+              </div>
+              
+              <!-- Workspace section -->
+              <div class="field-section">
+                <div class="field-group-title">Workspace Size (mm)</div>
+                <div class="field-description">Work area dimensions displayed on the 2D drawing.</div>
+                <div class="settings-input-grid-2x1">
+                  <div>
+                    <label class="field-label" for="workspace-width-input">Width X (mm)</label>
+                    <input id="workspace-width-input" class="text-input" type="number" value="170" min="1" step="1">
+                  </div>
+                  <div>
+                    <label class="field-label" for="workspace-height-input">Height Y (mm)</label>
+                    <input id="workspace-height-input" class="text-input" type="number" value="170" min="1" step="1">
+                  </div>
+                </div>
+                <div class="settings-action-row">
+                  <button id="set-workspace-btn" class="primary-button" style="background:var(--cyan);color:#fff;">Apply Workspace</button>
+                  <span id="workspace-status" class="settings-status-text"></span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Card 4: G54–G59 WCS Offsets -->
+            <div class="panel settings-card">
+              <div class="panel-header">
+                <div>
+                  <div class="panel-title">G54–G59 Work Coordinate Offsets</div>
+                  <div class="panel-subtitle">Offsets added to G-code. Select active WCS and set values.</div>
+                </div>
+              </div>
+              
+              <div style="display:flex; align-items:center; gap:8px; margin-bottom:8px;">
+                <label class="field-label" for="wcs-select" style="margin-bottom:0 !important; white-space:nowrap;">Active WCS:</label>
+                <select id="wcs-select" style="width:80px;">
+                  <option value="G54">G54</option>
+                  <option value="G55">G55</option>
+                  <option value="G56">G56</option>
+                  <option value="G57">G57</option>
+                  <option value="G58">G58</option>
+                  <option value="G59">G59</option>
+                </select>
+              </div>
+              
+              <div class="settings-input-grid-2x1">
+                <div>
+                  <label class="field-label" for="wcs-offset-x">Offset X (mm)</label>
+                  <input id="wcs-offset-x" class="text-input" type="number" value="0" step="0.001">
+                </div>
+                <div>
+                  <label class="field-label" for="wcs-offset-y">Offset Y (mm)</label>
+                  <input id="wcs-offset-y" class="text-input" type="number" value="0" step="0.001">
+                </div>
+              </div>
+              
+              <div class="settings-action-row">
+                <button id="set-wcs-btn" class="primary-button" style="background:var(--cyan);color:#fff;">Apply WCS Offset</button>
+                <span id="wcs-status" class="settings-status-text"></span>
+              </div>
+            </div>
+
+          </div>
+
+        </div>
+        
+        <div style="margin-top:4px; font-size:9px; color:var(--muted); text-align:center;">
+          All settings are saved to app_settings.txt and auto-loaded on startup.
+        </div>
+      </section>
+
+      <!-- ========== HELP ========== -->
+      <section id="view-help" class="view">
+        <div class="panel" style="max-width:800px;line-height:1.7;">
+          <div class="panel-header">
+            <div>
+              <div class="panel-title">User Guide</div>
+              <div class="panel-subtitle">DACDT 2026 — Gantry Robot Control System</div>
+            </div>
+          </div>
+
+          <div style="margin-top:16px;font-size:13px;color:var(--text-main);">
+
+            <h3 style="color:var(--cyan);margin:20px 0 8px;">1. Dashboard</h3>
+            <p>Displays PLC connection status, 3-axis positions (X, Y, Z), speed, error codes, and Program Monitor tracking the current running line.</p>
+            <ul>
+              <li><b>CONNECT PLC Q</b> — Connect to Mitsubishi PLC via MX Component (logical station)</li>
+              <li><b>HOME</b> — Return to machine home (hold button)</li>
+              <li><b>RESET</b> — Reset axis error (hold button)</li>
+              <li><b>START ACTION</b> — Start running the loaded program (hold button)</li>
+              <li><b>EMERGENCY STOP</b> — Emergency stop all axes</li>
+              <li><b>Manual Jog</b> — Manual control using ←↑→↓ Z+/Z- buttons</li>
+            </ul>
+
+            <h3 style="color:var(--cyan);margin:20px 0 8px;">2. DXF/GCODE RUN</h3>
+            <p>Open DXF or G-code files, view 2D drawing, edit G-code, and send to PLC.</p>
+            <ul>
+              <li><b>Open</b> — Open DXF (.dxf) or G-code (.nc, .gcode, .g) file</li>
+              <li><b>New</b> — Create new empty G-code file</li>
+              <li><b>Save G-code</b> — Save G-code file (choose path on first save)</li>
+              <li><b>Send CAD to PLC</b> — Send entire program to PLC buffer memory</li>
+              <li><b>Clear Buffer</b> — Clear PLC buffer before loading new program</li>
+            </ul>
+            <p><b>Geometry Data</b> — Coordinate table of Line/Arc/Circle segments from file</p>
+            <p><b>Process Table</b> — Command table sent to PLC (Motion type, M code, Speed, end coordinates)</p>
+
+            <h3 style="color:var(--cyan);margin:20px 0 8px;">3. Supported G-code</h3>
+            <table class="data-table compact" style="font-size:12px;margin:8px 0;">
+              <tr><td><b>G00</b></td><td>Rapid move — uses speed from Settings</td></tr>
+              <tr><td><b>G01</b></td><td>Linear interpolation — speed from F parameter</td></tr>
+              <tr><td><b>G02</b></td><td>Circular interpolation CW (clockwise) — I/J or R</td></tr>
+              <tr><td><b>G03</b></td><td>Circular interpolation CCW (counter-clockwise) — I/J or R</td></tr>
+              <tr><td><b>G54–G59</b></td><td>Select work coordinate system (offset added to coordinates)</td></tr>
+              <tr><td><b>G90</b></td><td>Absolute coordinate mode</td></tr>
+              <tr><td><b>M03</b></td><td>Start dispensing (glue ON)</td></tr>
+              <tr><td><b>M04</b></td><td>Stop dispensing (glue OFF)</td></tr>
+            </table>
+
+            <h4 style="color:var(--text-main);margin:16px 0 6px;">Coordinate Systems</h4>
+            <ul>
+              <li><b>Machine Home</b> — Fixed reference point on the machine, defined by manufacturer.</li>
+              <li><b>Work Coordinate (G54–G59)</b> — Origin point (X=0, Y=0) set by operator on the workpiece. Offset configured in Settings.</li>
+            </ul>
+
+            <p><b>Modal rules:</b> A line with only coordinates (no G command) uses the previous G command. A line with only X or Y keeps the other axis unchanged.</p>
+
+            <h3 style="color:var(--cyan);margin:20px 0 8px;">4. Supported DXF Entities</h3>
+            <p>Supported: <b>Line, Polyline2D, Polyline3D, Arc, Circle, Block/Insert</b></p>
+            <p>Automatically assigns M03 (path start) and M04 (path end) for each trajectory.</p>
+
+            <h3 style="color:var(--cyan);margin:20px 0 8px;">5. Settings</h3>
+            <ul>
+              <li><b>G00 Rapid Speed</b> — Speed for all G00 commands (mm/min)</li>
+              <li><b>Workspace Size</b> — Work area dimensions shown on 2D drawing</li>
+              <li><b>DXF Offset & Speed</b> — Offset X/Y, Speed, Dwell M03/M04 for DXF files</li>
+              <li><b>G54–G59 WCS Offsets</b> — Coordinate offsets for each work coordinate system (G-code)</li>
+            </ul>
+            <p>All settings are saved to <code>app_settings.txt</code> and auto-loaded on startup.</p>
+
+            <h3 style="color:var(--cyan);margin:20px 0 8px;">6. Operating Procedure</h3>
+            <ol>
+              <li>Connect PLC (press CONNECT PLC Q)</li>
+              <li>Open DXF or G-code file (DXF/GCODE RUN tab → Open)</li>
+              <li>Verify Process Table and 2D drawing</li>
+              <li>Configure Speed, Offset if needed (Settings tab)</li>
+              <li>Press <b>Clear Buffer</b> → <b>Send CAD to PLC</b></li>
+              <li>Hold <b>START ACTION</b> to run</li>
+              <li>Monitor progress on Dashboard (Program Monitor)</li>
+            </ol>
+
+            <h3 style="color:var(--cyan);margin:20px 0 8px;">7. Controls & Shortcuts</h3>
+            <ul>
+              <li><b>Mouse wheel</b> on 2D drawing — Zoom in/out</li>
+              <li><b>Mouse drag</b> on 2D drawing — Pan (move view)</li>
+              <li><b>EXIT APP</b> (sidebar) — Close application</li>
+            </ul>
+
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+  <!-- Removed toast-container -->
+  <div id="prompt-modal" class="modal-backdrop hidden">
+    <div class="modal-card">
+      <div id="modal-title" class="modal-title">Input</div>
+      <div id="modal-label" class="modal-label"></div>
+      <input id="modal-input" class="text-input" type="text">
+      <div class="modal-actions">
+        <button id="modal-cancel" class="secondary-button">Cancel</button>
+        <button id="modal-confirm" class="primary-button">OK</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="xlsx.full.min.js"></script>
+  <script src="app.js"></script>
+</body>
+
+</html>

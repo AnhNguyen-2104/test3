@@ -67,6 +67,13 @@ namespace DACDT_2026
             public string Speed            { get; set; }
             public string EndCoordinate    { get; set; }
             public string CenterCoordinate { get; set; }
+            
+            // ← NEW: Pre-parsed coordinate values (from Cách 1 optimization)
+            public double EndXMm           { get; set; }      // X tọa độ thực (mm)
+            public double EndYMm           { get; set; }      // Y tọa độ thực (mm)
+            public double CenterXMm        { get; set; }      // Center X (mm)
+            public double CenterYMm        { get; set; }      // Center Y (mm)
+            
             public double EndZ             { get; set; } // Z tọa độ đích (0 = không có Z / 2-axis)
         }
 
@@ -751,20 +758,16 @@ namespace DACDT_2026
                 bulkData[blockOffset + OffsetSpeed + 1] = (short)((speedVal >> 16) & 0xFFFF);
 
                 // 5. Position X (32-bit -> 2 words)
-                int endX = 0;
-                if (TryParseCoordinateX(row.EndCoordinate, out endX))
-                {
-                    bulkData[blockOffset + OffsetPosX]     = (short)(endX & 0xFFFF);
-                    bulkData[blockOffset + OffsetPosX + 1] = (short)((endX >> 16) & 0xFFFF);
-                }
+                // ← OPTIMIZED: Use pre-parsed EndXMm instead of parsing string
+                int endX = (int)Math.Round(row.EndXMm * CoordinateMultiplier);
+                bulkData[blockOffset + OffsetPosX]     = (short)(endX & 0xFFFF);
+                bulkData[blockOffset + OffsetPosX + 1] = (short)((endX >> 16) & 0xFFFF);
 
                 // 6. Center X (32-bit -> 2 words)
-                int centerX = 0;
-                if (TryParseCoordinateX(row.CenterCoordinate, out centerX))
-                {
-                    bulkData[blockOffset + OffsetCenterX]     = (short)(centerX & 0xFFFF);
-                    bulkData[blockOffset + OffsetCenterX + 1] = (short)((centerX >> 16) & 0xFFFF);
-                }
+                // ← OPTIMIZED: Use pre-parsed CenterXMm instead of parsing string
+                int centerX = (int)Math.Round(row.CenterXMm * CoordinateMultiplier);
+                bulkData[blockOffset + OffsetCenterX]     = (short)(centerX & 0xFFFF);
+                bulkData[blockOffset + OffsetCenterX + 1] = (short)((centerX >> 16) & 0xFFFF);
             }
 
             try
@@ -868,20 +871,16 @@ namespace DACDT_2026
                 bulkData[blockOffset + OffsetMoveCode] = moveCode;
 
                 // Da.6 Positioning address Y (32-bit) — offset 6 & 7
-                int endY = 0;
-                if (TryParseCoordinateY(row.EndCoordinate, out endY))
-                {
-                    bulkData[blockOffset + OffsetPosX]     = (short)(endY & 0xFFFF);
-                    bulkData[blockOffset + OffsetPosX + 1] = (short)((endY >> 16) & 0xFFFF);
-                }
+                // ← OPTIMIZED: Use pre-parsed EndYMm instead of parsing string
+                int endY = (int)Math.Round(row.EndYMm * CoordinateMultiplier);
+                bulkData[blockOffset + OffsetPosX]     = (short)(endY & 0xFFFF);
+                bulkData[blockOffset + OffsetPosX + 1] = (short)((endY >> 16) & 0xFFFF);
 
                 // Da.7 Arc address Y (32-bit) — offset 8 & 9
-                int centerY = 0;
-                if (TryParseCoordinateY(row.CenterCoordinate, out centerY))
-                {
-                    bulkData[blockOffset + OffsetCenterX]     = (short)(centerY & 0xFFFF);
-                    bulkData[blockOffset + OffsetCenterX + 1] = (short)((centerY >> 16) & 0xFFFF);
-                }
+                // ← OPTIMIZED: Use pre-parsed CenterYMm instead of parsing string
+                int centerY = (int)Math.Round(row.CenterYMm * CoordinateMultiplier);
+                bulkData[blockOffset + OffsetCenterX]     = (short)(centerY & 0xFFFF);
+                bulkData[blockOffset + OffsetCenterX + 1] = (short)((centerY >> 16) & 0xFFFF);
             }
 
             try

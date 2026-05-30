@@ -62,6 +62,8 @@ namespace DACDT_2026
                         idx = ParseCircle(lines, idx, primitives, ref minX, ref minY, ref maxX, ref maxY);
                     else if (entityType == "LWPOLYLINE")
                         idx = ParseLwPolyline(lines, idx, primitives, ref minX, ref minY, ref maxX, ref maxY);
+                    else if (entityType == "SPLINE")
+                        idx = ParseSpline(lines, idx, primitives, ref minX, ref minY, ref maxX, ref maxY);
                     else
                         idx = SkipEntity(lines, idx); // Skip unknown entities
                 }
@@ -264,6 +266,96 @@ namespace DACDT_2026
             }
             return idx;
         }
+
+        private static int ParseSpline(string[] lines, int idx, List<CadDocumentService.CadPrimitiveData> prims,
+            ref float minX, ref float minY, ref float maxX, ref float maxY)
+        {
+            var controlPoints = new List<CadDocumentService.CadCoordinate>();
+            double curX = 0;
+            while (idx < lines.Length - 1)
+            {
+                string code = lines[idx].Trim();
+                if (code == "0") break;
+                string val = lines[idx + 1].Trim();
+
+                switch (code)
+                {
+                    case "10":
+                        curX = Dbl(val);
+                        break;
+                    case "20":
+                        double curY = Dbl(val);
+                        controlPoints.Add(new CadDocumentService.CadCoordinate(curX, curY));
+                        UpdateBounds(curX, curY, ref minX, ref minY, ref maxX, ref maxY);
+                        break;
+                }
+                idx += 2;
+            }
+
+            if (controlPoints.Count >= 2)
+            {
+                // Implementing B-spline interpolation for smoother curves
+                var interpolatedPoints = InterpolateBSpline(controlPoints);
+                prims.Add(new CadDocumentService.CadPrimitiveData
+                {
+                    SourceType = "Spline",
+                    Points = interpolatedPoints
+                });
+            }
+
+            return idx;
+        }
+
+        private static List<CadDocumentService.CadCoordinate> InterpolateBSpline(List<CadDocumentService.CadCoordinate> controlPoints)
+        {
+            // Fallback to a robust Catmull-Rom style interpolation that works for any number of control points.
+            var pts = new List<CadDocumentService.CadCoordinate>();
+            int n = controlPoints.Count;
+            if (n == 0) return pts;
+            if (n == 1)
+            {
+                pts.Add(controlPoints[0]);
+                return pts;
+            }
+            if (n == 2)
+            {
+                // Simple straight line between two points
+                pts.Add(controlPoints[0]);
+                pts.Add(controlPoints[1]);
+                return pts;
+            }
+
+            int segmentsPerPair = 8; // points generated per segment
+            for (int i = 0; i < n - 1; i++)
+            {
+                var p0 = i == 0 ? controlPoints[i] : controlPoints[i - 1];
+                var p1 = controlPoints[i];
+                var p2 = controlPoints[i + 1];
+                var p3 = (i + 2 < n) ? controlPoints[i + 2] : controlPoints[i + 1];
+
+                for (int j = 0; j <= segmentsPerPair; j++)
+                {
+                    double t = (double)j / segmentsPerPair;
+                    double t2 = t * t;
+                    double t3 = t2 * t;
+
+                    // Catmull-Rom spline (centripetal-like basis)
+                    double x = 0.5 * ((-p0.X + 3 * p1.X - 3 * p2.X + p3.X) * t3
+                                      + (2 * p0.X - 5 * p1.X + 4 * p2.X - p3.X) * t2
+                                      + (-p0.X + p2.X) * t
+                                      + 2 * p1.X);
+                    double y = 0.5 * ((-p0.Y + 3 * p1.Y - 3 * p2.Y + p3.Y) * t3
+                                      + (2 * p0.Y - 5 * p1.Y + 4 * p2.Y - p3.Y) * t2
+                                      + (-p0.Y + p2.Y) * t
+                                      + 2 * p1.Y);
+
+                    pts.Add(new CadDocumentService.CadCoordinate(x, y));
+                }
+            }
+
+            return pts;
+        }
+
 
         private static void UpdateBounds(double x, double y, ref float minX, ref float minY, ref float maxX, ref float maxY)
         {

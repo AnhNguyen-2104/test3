@@ -118,6 +118,19 @@
 
             <div id="connection-meta" class="muted-text" style="margin-top:12px;">MX Component logical station: 0</div>
           </div>
+          
+          <!-- Program Monitor -->
+          <div class="panel panel-program-monitor" style="display:flex; flex-direction:column;">
+            <div class="panel-header">
+              <div>
+                <div class="panel-title">Program Monitor</div>
+                <div class="panel-subtitle">Current running line progress</div>
+              </div>
+            </div>
+            <div id="program-monitor-body" style="flex:1; overflow-y:auto; border:1px solid var(--border); border-radius:var(--radius-sm); background:rgba(0,0,0,0.2);">
+              <!-- Generated dynamically by app.js -->
+            </div>
+          </div>
 
           <!-- Axis Monitor -->
           <div class="panel panel-axis-monitor">
@@ -129,6 +142,22 @@
             </div>
             <div class="axis-grid" id="axis-grid">
               <!-- Generated dynamically by app.js -->
+            </div>
+          </div>
+
+          <!-- Camera Feed -->
+          <div class="panel panel-camera">
+            <div class="panel-header" style="flex-wrap: wrap; gap: 8px;">
+              <div class="panel-title">Camera Feed</div>
+              <div style="display:flex; gap:8px; align-items:center;">
+                <select id="camera-select" class="text-input compact" style="margin:0; width:auto; min-width:150px; background:var(--panel-2); color:var(--text); border:1px solid var(--border-strong); border-radius:6px; height:32px;"></select>
+                <button id="toggle-camera-btn" class="primary-button compact">Start Camera</button>
+                <button id="record-camera-btn" class="primary-button compact" style="display:none; background:var(--orange);">Record</button>
+                <span id="record-indicator" style="display:none; color:var(--red); font-weight:bold; font-size:12px; animation: blink 1s infinite;">● REC</span>
+              </div>
+            </div>
+            <div class="camera-frame" style="background:#000; border-radius:var(--radius-md); overflow:hidden; display:flex; align-items:center; justify-content:center; min-height:450px; max-height:700px; position:relative;">
+              <video id="camera-stream" autoplay playsinline style="width:100%; height:100%; object-fit:contain;"></video>
             </div>
           </div>
 

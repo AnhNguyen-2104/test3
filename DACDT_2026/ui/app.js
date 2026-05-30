@@ -544,7 +544,125 @@ function initLogin() {
 
 function applyPermissions() {}
 
-document.addEventListener("DOMContentLoaded", () => { initLogin(); });
+// ── Camera Feed & Recording ───────────────────────────────────────────────
+let cameraStream = null;
+let mediaRecorder = null;
+let recordedChunks = [];
+
+async function initCamera() {
+  const toggleBtn = document.getElementById("toggle-camera-btn");
+  const video = document.getElementById("camera-stream");
+  const camSelect = document.getElementById("camera-select");
+  const recordBtn = document.getElementById("record-camera-btn");
+  const recordIndicator = document.getElementById("record-indicator");
+  if (!toggleBtn || !video || !camSelect) return;
+
+  // Load available cameras
+  try {
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const videoDevices = devices.filter(d => d.kind === 'videoinput');
+    camSelect.innerHTML = videoDevices.map((d, i) => 
+      `<option value="${d.deviceId}">Camera ${i + 1}: ${d.label || 'Unknown Device'}</option>`
+    ).join("");
+  } catch (err) {
+    console.error("Cannot enumerate devices:", err);
+  }
+
+  // Handle start/stop camera
+  toggleBtn.addEventListener("click", async () => {
+    if (cameraStream) {
+      // Stop camera
+      if (mediaRecorder && mediaRecorder.state !== "inactive") {
+        mediaRecorder.stop();
+      }
+      cameraStream.getTracks().forEach(t => t.stop());
+      cameraStream = null;
+      video.srcObject = null;
+      toggleBtn.textContent = "Start Camera";
+      toggleBtn.style.background = "";
+      recordBtn.style.display = "none";
+      recordIndicator.style.display = "none";
+    } else {
+      // Start camera
+      try {
+        toggleBtn.textContent = "Starting...";
+        const deviceId = camSelect.value;
+        const constraints = {
+          video: deviceId ? { deviceId: { exact: deviceId }, width: { ideal: 1280 }, height: { ideal: 720 } } : true,
+          audio: false
+        };
+        cameraStream = await navigator.mediaDevices.getUserMedia(constraints);
+        video.srcObject = cameraStream;
+        toggleBtn.textContent = "Stop Camera";
+        toggleBtn.style.background = "#ef4444";
+        recordBtn.style.display = "inline-block";
+      } catch (err) {
+        console.error("Camera error:", err);
+        toggleBtn.textContent = "Start Camera";
+        showToast("error", "Camera", "Cannot access camera: " + (err.message || err));
+        addLocalEvent("error", "Camera", "Cannot access camera: " + (err.message || err));
+      }
+    }
+  });
+
+  // Change camera when selection changes
+  camSelect.addEventListener("change", () => {
+    if (cameraStream) {
+      // Stop current and restart with new selection
+      toggleBtn.click();
+      setTimeout(() => toggleBtn.click(), 500);
+    }
+  });
+
+  // Handle recording
+  if (recordBtn) {
+    recordBtn.addEventListener("click", () => {
+      if (!cameraStream) return;
+
+      if (mediaRecorder && mediaRecorder.state === "recording") {
+        // Stop recording
+        mediaRecorder.stop();
+        recordBtn.textContent = "Record";
+        recordBtn.style.background = "var(--orange)";
+        recordIndicator.style.display = "none";
+      } else {
+        // Start recording
+        recordedChunks = [];
+        try {
+          mediaRecorder = new MediaRecorder(cameraStream, { mimeType: 'video/webm' });
+        } catch (e) {
+          mediaRecorder = new MediaRecorder(cameraStream); // fallback
+        }
+        
+        mediaRecorder.ondataavailable = (e) => {
+          if (e.data.size > 0) recordedChunks.push(e.data);
+        };
+        
+        mediaRecorder.onstop = () => {
+          const blob = new Blob(recordedChunks, { type: mediaRecorder.mimeType || 'video/webm' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          document.body.appendChild(a);
+          a.style = "display: none";
+          a.href = url;
+          const ts = new Date().toISOString().slice(0,19).replace(/[:T]/g, "-");
+          a.download = `DACDT_Record_${ts}.webm`;
+          a.click();
+          window.URL.revokeObjectURL(url);
+          showToast("success", "Recording", "Video saved to Downloads folder.");
+          addLocalEvent("success", "Recording", "Video saved successfully.");
+        };
+
+        mediaRecorder.start();
+        recordBtn.textContent = "Stop REC";
+        recordBtn.style.background = "var(--red)";
+        recordIndicator.style.display = "inline-block";
+      }
+    });
+  }
+}
+
+document.addEventListener("DOMContentLoaded", () => { initLogin(); initCamera(); });
 
 function handleHostMessage(msg) {
   if (!msg || !msg.type) return;
@@ -622,7 +740,7 @@ function renderControl() {
 
   // Render 3 axes + Program Monitor panel
   const axes = state.control.axes || [];
-  const accents = ['accent-axis-1', 'accent-axis-2', 'accent-axis-3'];
+  const accents = ['accent-axis-1', 'accent-axis-2', 'accent-axis-3', 'accent-axis-4'];
   const fields = [
     { key: 'currentPos', label: 'CURRENT POSITION (mm)', addrKey: 'currentPosAddr', big: true },
     { key: 'currentSpeed', label: 'CURRENT SPEED (mm/min)', addrKey: 'currentSpeedAddr', big: true },
@@ -633,91 +751,97 @@ function renderControl() {
     { key: 'currentDataNo', label: 'MD.44 CURR DATA NO.', addrKey: 'currentDataNoAddr' },
     { key: 'lastDataNo', label: 'MD.46 LAST DATA NO.', addrKey: 'lastDataNoAddr' },
   ];
-  const grid = document.getElementById('axis-grid');
-  if (grid) {
-    // Render 3 axis cards
-    let html = axes.slice(0, 3).map((a, i) => {
-      const n = a.index || (i + 1);
-      const rows = fields.map(f => {
-        const val = a[f.key] || '--';
-        const addr = a[f.addrKey] || '';
-        const cls = f.big ? 'axis-field-value' : 'axis-field-value sm';
-        return `<div class="axis-field"><div class="axis-field-label">${esc(f.label)} <span class="axis-addr">${esc(addr)}</span></div><div class="${cls}">${esc(val)}</div></div>`;
+  // Render 4 axis cards into axis-grid
+  {
+    const grid = document.getElementById('axis-grid');
+    if (grid) {
+      const html = axes.slice(0, 4).map((a, i) => {
+        const n = a.index || (i + 1);
+        const rows = fields.map(f => {
+          const val = a[f.key] || '--';
+          const addr = a[f.addrKey] || '';
+          const cls = f.big ? 'axis-field-value' : 'axis-field-value sm';
+          return `<div class="axis-field"><div class="axis-field-label">${esc(f.label)} <span class="axis-addr">${esc(addr)}</span></div><div class="${cls}">${esc(val)}</div></div>`;
+        }).join('');
+        const lm = a.limitMinus ? '#ef4444' : '#333';
+        const lp = a.limitPlus ? '#ef4444' : '#333';
+        const hm = a.homeDog ? '#22c55e' : '#333';
+        const cp = a.isComplete ? '#3b82f6' : '#333';
+        const leds = `<div style="display:flex;gap:8px;margin-top:6px;padding-top:6px;border-top:1px solid rgba(255,255,255,0.05);">
+          <span style="font-size:9px;color:var(--muted);display:flex;align-items:center;gap:3px;"><span style="width:8px;height:8px;border-radius:50%;background:${lm};display:inline-block;"></span>LIM-</span>
+          <span style="font-size:9px;color:var(--muted);display:flex;align-items:center;gap:3px;"><span style="width:8px;height:8px;border-radius:50%;background:${lp};display:inline-block;"></span>LIM+</span>
+          <span style="font-size:9px;color:var(--muted);display:flex;align-items:center;gap:3px;"><span style="width:8px;height:8px;border-radius:50%;background:${hm};display:inline-block;"></span>HOME</span>
+          <span style="font-size:9px;color:var(--muted);display:flex;align-items:center;gap:3px;"><span style="width:8px;height:8px;border-radius:50%;background:${cp};display:inline-block;"></span>DONE</span>
+        </div>`;
+        return `<div class="axis-card"><div class="axis-header ${accents[i] || ''}">AXIS ${n}</div><div class="axis-body">${rows}${leds}</div></div>`;
       }).join('');
-      // Signal LEDs
-      const lm = a.limitMinus ? '#ef4444' : '#333';
-      const lp = a.limitPlus ? '#ef4444' : '#333';
-      const hm = a.homeDog ? '#22c55e' : '#333';
-      const cp = a.isComplete ? '#3b82f6' : '#333';
-      const leds = `<div style="display:flex;gap:8px;margin-top:6px;padding-top:6px;border-top:1px solid rgba(255,255,255,0.05);">
-        <span style="font-size:9px;color:var(--muted);display:flex;align-items:center;gap:3px;"><span style="width:8px;height:8px;border-radius:50%;background:${lm};display:inline-block;"></span>LIM-</span>
-        <span style="font-size:9px;color:var(--muted);display:flex;align-items:center;gap:3px;"><span style="width:8px;height:8px;border-radius:50%;background:${lp};display:inline-block;"></span>LIM+</span>
-        <span style="font-size:9px;color:var(--muted);display:flex;align-items:center;gap:3px;"><span style="width:8px;height:8px;border-radius:50%;background:${hm};display:inline-block;"></span>HOME</span>
-        <span style="font-size:9px;color:var(--muted);display:flex;align-items:center;gap:3px;"><span style="width:8px;height:8px;border-radius:50%;background:${cp};display:inline-block;"></span>DONE</span>
-      </div>`;
-      return `<div class="axis-card"><div class="axis-header ${accents[i] || ''}">AXIS ${n}</div><div class="axis-body">${rows}${leds}</div></div>`;
-    }).join('');
-
-    // Program Monitor panel (thay Axis 4)
-    const processRows = state.dxf && state.dxf.processRows ? state.dxf.processRows : [];
-    const currentLine = (axes[0] && axes[0].currentDataNo && axes[0].currentDataNo !== "--") ? parseInt(axes[0].currentDataNo, 10) : 0;
-
-    // Chỉ rebuild Program Monitor khi data thay đổi (tránh reset scroll mỗi 50ms)
-    const progKey = processRows.length + '_' + currentLine;
-    const existingMonitor = document.getElementById('program-monitor-body');
-    if (!existingMonitor || existingMonitor.dataset.progKey !== progKey) {
-      let progHtml = '<div class="axis-card" style="display:flex;flex-direction:column;overflow:visible;"><div class="axis-header accent-axis-4">PROGRAM MONITOR</div><div style="padding:0;overflow-y:auto;max-height:400px;" id="program-monitor-body" data-prog-key="' + progKey + '">';
-      progHtml += '<table class="data-table compact" style="font-size:11px;margin:0;"><thead style="position:sticky;top:0;background:var(--panel-2);z-index:1;"><tr><th style="width:30px">#</th><th>Motion</th><th>End (X;Y)</th><th>M</th></tr></thead><tbody>';
-      for (let i = 0; i < processRows.length; i++) {
-        const r = processRows[i];
-        const lineNo = i + 1;
-        const isActive = lineNo === currentLine;
-        const cls = isActive ? 'style="background:rgba(34,197,94,0.25);color:#22c55e;font-weight:bold;"' : '';
-        const marker = isActive ? '▶ ' : '';
-        const endCoord = r.endCoordinateDisplay || r.endCoordinate || "";
-        progHtml += `<tr ${cls} id="prog-line-${lineNo}"><td>${marker}${lineNo}</td><td>${esc(r.motionType || "").split("(")[0].trim()}</td><td>${esc(endCoord)}</td><td>${esc(r.mCodeValue || "")}</td></tr>`;
-      }
-      if (processRows.length === 0) {
-        progHtml += '<tr><td colspan="4" style="text-align:center;color:var(--muted);padding:12px;">No program loaded</td></tr>';
-      }
-      progHtml += '</tbody></table></div></div>';
-      html += progHtml;
       grid.innerHTML = html;
-
-      // Auto-scroll chỉ khi đang chạy (currentLine > 0)
-      if (currentLine > 0) {
-        const activeRow = document.getElementById('prog-line-' + currentLine);
-        if (activeRow) activeRow.scrollIntoView({ block: 'center', behavior: 'auto' });
-      }
-    } else {
-      // Chỉ update 3 axis cards, giữ nguyên Program Monitor (không reset scroll)
-      const axisCards = grid.querySelectorAll('.axis-card');
-      if (axisCards.length >= 3) {
-        for (let i = 0; i < 3 && i < axisCards.length; i++) {
-          const a = axes[i] || {};
-          const n = a.index || (i + 1);
-          const rowsHtml = fields.map(f => {
-            const val = a[f.key] || '--';
-            const addr = a[f.addrKey] || '';
-            const cls = f.big ? 'axis-field-value' : 'axis-field-value sm';
-            return `<div class="axis-field"><div class="axis-field-label">${esc(f.label)} <span class="axis-addr">${esc(addr)}</span></div><div class="${cls}">${esc(val)}</div></div>`;
-          }).join('');
-          // Signal LEDs
-          const lm = a.limitMinus ? '#ef4444' : '#333';
-          const lp = a.limitPlus ? '#ef4444' : '#333';
-          const hm = a.homeDog ? '#22c55e' : '#333';
-          const cp = a.isComplete ? '#3b82f6' : '#333';
-          const leds = `<div style="display:flex;gap:8px;margin-top:6px;padding-top:6px;border-top:1px solid rgba(255,255,255,0.05);">
-            <span style="font-size:9px;color:var(--muted);display:flex;align-items:center;gap:3px;"><span style="width:8px;height:8px;border-radius:50%;background:${lm};display:inline-block;"></span>LIM-</span>
-            <span style="font-size:9px;color:var(--muted);display:flex;align-items:center;gap:3px;"><span style="width:8px;height:8px;border-radius:50%;background:${lp};display:inline-block;"></span>LIM+</span>
-            <span style="font-size:9px;color:var(--muted);display:flex;align-items:center;gap:3px;"><span style="width:8px;height:8px;border-radius:50%;background:${hm};display:inline-block;"></span>HOME</span>
-            <span style="font-size:9px;color:var(--muted);display:flex;align-items:center;gap:3px;"><span style="width:8px;height:8px;border-radius:50%;background:${cp};display:inline-block;"></span>DONE</span>
-          </div>`;
-          const body = axisCards[i].querySelector('.axis-body');
-          if (body) body.innerHTML = rowsHtml + leds;
-        }
-      }
     }
+
+     // Program Monitor panel (scrollable view with cursor)
+     const processRows = state.dxf && state.dxf.processRows ? state.dxf.processRows : [];
+     const currentLine = (axes[0] && axes[0].currentDataNo && axes[0].currentDataNo !== "--") ? parseInt(axes[0].currentDataNo, 10) : 0;
+     const progKey = processRows.length + '_' + currentLine;
+     const progBody = document.getElementById('program-monitor-body');
+     if (progBody && progBody.dataset.progKey !== progKey) {
+       progBody.dataset.progKey = progKey;
+       
+       if (processRows.length === 0) {
+         progBody.innerHTML = '<div class="program-monitor-empty">No program loaded</div>';
+       } else {
+         // Only show context window around current line (±3 lines)
+         const contextSize = 3;
+         const startIdx = Math.max(0, currentLine - contextSize - 1);
+         const endIdx = Math.min(processRows.length, currentLine + contextSize);
+         
+         let progHtml = '<div class="program-monitor-list">';
+         
+         // Add "before" indicator if there are rows above
+         if (startIdx > 0) {
+           progHtml += `<div class="program-monitor-indicator">↑ ${startIdx} line${startIdx > 1 ? 's' : ''} before</div>`;
+         }
+         
+         for (let i = startIdx; i < endIdx; i++) {
+           const r = processRows[i];
+           const lineNo = i + 1;
+           const isActive = lineNo === currentLine;
+           const marker = isActive ? '▶' : '';
+           const endCoord = r.endCoordinateDisplay || r.endCoordinate || "";
+           const motionType = esc(r.motionType || "").split("(")[0].trim();
+           const mCode = esc(r.mCodeValue || "");
+           const activeClass = isActive ? 'program-monitor-row-active' : '';
+           progHtml += `<div class="program-monitor-row ${activeClass}" id="prog-line-${lineNo}">
+             <span class="prog-marker">${marker}</span>
+             <span class="prog-number">${lineNo}</span>
+             <span class="prog-motion">${motionType}</span>
+             <span class="prog-coord">${endCoord}</span>
+             <span class="prog-mcode">${mCode}</span>
+           </div>`;
+         }
+         
+         // Add "after" indicator if there are rows below
+         if (endIdx < processRows.length) {
+           progHtml += `<div class="program-monitor-indicator">↓ ${processRows.length - endIdx} line${processRows.length - endIdx > 1 ? 's' : ''} after</div>`;
+         }
+         
+         progHtml += '</div>';
+         progBody.innerHTML = progHtml;
+         
+         // Auto-scroll to current line
+        if (currentLine > 0) {
+           const activeRow = document.getElementById('prog-line-' + currentLine);
+           if (activeRow) {
+             // Scroll within the container instead of scrolling the whole page
+             const container = document.getElementById('program-monitor-body');
+             if (container) {
+               const offsetTop = activeRow.offsetTop;
+               const containerHeight = container.clientHeight;
+               container.scrollTop = offsetTop - (containerHeight / 2) + (activeRow.clientHeight / 2);
+             }
+           }
+         }
+       }
+     }
   }
   renderEvents();
   updateNavState();
